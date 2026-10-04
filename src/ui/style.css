@@ -1,3 +1,14 @@
+/* Chinese UI font: subset of "Fusion Pixel 12px Mono zh-Hans" (OFL-1.1),
+   a pixel/bitmap-style CJK font that matches the ASCII terminal look.
+   See src/ui/fonts/OFL.txt for the license. */
+@font-face {
+  font-family: "Fusion Pixel 12px Mono";
+  src: url("./fonts/fusion-pixel-12px-mono-zh-hans-subset.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #05070a;
   --fg: #b8ffc7;
@@ -5,8 +16,11 @@
   --accent2: #ff4d6d;
   --dim: #16402a;
   --warn: #ffcc4d;
-  --font: "Cascadia Mono", "Consolas", "Menlo", "DejaVu Sans Mono", monospace;
+  --font-en: "Cascadia Mono", "Consolas", "Menlo", "DejaVu Sans Mono", monospace;
+  --font-zh: "Fusion Pixel 12px Mono", "Sarasa Mono SC", "Noto Sans Mono CJK SC", "Microsoft YaHei", "PingFang SC", "WenQuanYi Micro Hei", monospace;
+  --font: var(--font-en);
 }
+:root[lang="zh"] { --font: var(--font-zh); }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); }
 body { font-family: var(--font); color: var(--fg); -webkit-font-smoothing: none; }

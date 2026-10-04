@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { t } from '../ui/i18n.js';
 
 export const WEAPONS = [
   { id: 'pistol', name: 'VECTOR-9', cat: 'SIDEARM', dmg: 26, rpm: 320, mode: 'semi', mag: 12, reserve: 120, spread: 0.007, moveSpread: 0.02, recoilP: 1.05, recoilY: 0.28, reload: 1.45, pellets: 1, range: 140, color: 0xffddaa, tracer: [1, 0.85, 0.5] },
@@ -229,11 +230,11 @@ export class WeaponSystem {
     const slot = item.use.slot;
     const w = this.weapon;
     const prev = w.attachments[slot];
-    if (prev === item.id) return { ok: false, msg: 'ALREADY FITTED' };
+    if (prev === item.id) return { ok: false, msg: t('wep.alreadyFitted') };
     w.attachments[slot] = item.id;
     this.recompute(w);
     if (prev && this.inventory) this.inventory.add(prev, 1);
-    return { ok: true, msg: `${slot.toUpperCase()} FITTED` };
+    return { ok: true, msg: t('wep.slotFitted', { slot: t('slot.' + slot) }) };
   }
 
   /** Refill a fraction of every weapon's reserve. */

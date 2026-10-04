@@ -1,4 +1,5 @@
 import { applyAmmoToStats } from './ammo.js';
+import { t } from '../ui/i18n.js';
 
 /**
  * Weapon progression v2 — a multi-branch, multi-tier MOD TREE with exclusive
@@ -96,14 +97,14 @@ export class Progression {
 
   nodeLockReason(id, nodeId) {
     const node = TREE[nodeId];
-    if (!node) return 'UNKNOWN';
+    if (!node) return t('fx.unknown');
     const s = this.stateFor(id);
-    if (this.hasNode(s, nodeId)) return 'OWNED';
-    if (s.level < node.tier) return `REQ LEVEL ${node.tier}`;
-    if (node.req) for (const r of node.req) if (!this.hasNode(s, r)) return 'REQ ' + TREE[r].name;
-    if (node.reqAny && !node.reqAny.some(r => this.hasNode(s, r))) return 'REQ ' + TREE[node.reqAny[0]].name + ' +';
-    if (node.exclusive) for (const ex of node.exclusive) if (this.hasNode(s, ex)) return 'BLOCKED BY ' + TREE[ex].name;
-    if (s.mp < node.cost) return `NEED ${node.cost} MP`;
+    if (this.hasNode(s, nodeId)) return t('lock.owned');
+    if (s.level < node.tier) return t('lock.level', { n: node.tier });
+    if (node.req) for (const r of node.req) if (!this.hasNode(s, r)) return t('lock.req', { name: TREE[r].name });
+    if (node.reqAny && !node.reqAny.some(r => this.hasNode(s, r))) return t('lock.reqAny', { name: TREE[node.reqAny[0]].name });
+    if (node.exclusive) for (const ex of node.exclusive) if (this.hasNode(s, ex)) return t('lock.blocked', { name: TREE[ex].name });
+    if (s.mp < node.cost) return t('lock.mp', { n: node.cost });
     return null;
   }
   canUnlock(id, nodeId) { return this.nodeLockReason(id, nodeId) === null; }

@@ -2,6 +2,9 @@ import { TRACKS } from '../music/dnb.js';
 import { ITEMS, ITEMS_BY_ID } from '../game/items/registry.js';
 import { BRANCHES, TREE, MAX_WEAPON_LEVEL } from '../game/progression.js';
 import { RECIPES, canCraft } from '../game/crafting.js';
+import { ammoDef } from '../game/ammo.js';
+import { t, LANGS, getLang } from './i18n.js';
+import { statusName, buffName, slotName, grenadeName, revealName } from './localize.js';
 
 const ASCII_LOGO = String.raw`
    ██████╗ ██████╗ ███████╗ ██████╗    ██████╗ ██████╗ ██╗██████╗ ███████╗ █████╗ ██╗     ██╗
@@ -53,14 +56,14 @@ export class HUD {
       <div id="quickbar"></div>
       <div id="statuschips"></div>
       <canvas id="minimap" width="180" height="180"></canvas>
-      <div id="pause"><div class="panel"><h2 style="letter-spacing:6px;color:var(--accent)">PAUSED</h2>
-        <div class="hint" style="margin:12px 0">Click RESUME to re-capture the mouse.</div>
-        <div class="row"><button id="btn-resume">RESUME</button><button class="ghost" id="btn-arsenal">ARSENAL / UPGRADES</button><button class="ghost" id="btn-quit">QUIT TO MENU</button></div>
+      <div id="pause"><div class="panel"><h2 style="letter-spacing:6px;color:var(--accent)" data-i18n="pause.title">PAUSED</h2>
+        <div class="hint" style="margin:12px 0" data-i18n="pause.hint">Click RESUME to re-capture the mouse.</div>
+        <div class="row"><button id="btn-resume" data-i18n="pause.resume">RESUME</button><button class="ghost" id="btn-arsenal" data-i18n="pause.arsenal">ARSENAL / UPGRADES</button><button class="ghost" id="btn-quit" data-i18n="pause.quit">QUIT TO MENU</button></div>
       </div></div>
       <div id="dead"><div class="panel" style="width:min(560px,92vw)">
-        <h2 style="letter-spacing:8px;color:var(--accent2)">SIGNAL LOST</h2>
+        <h2 style="letter-spacing:8px;color:var(--accent2)" data-i18n="dead.title">SIGNAL LOST</h2>
         <div id="dead-stats" class="hint" style="margin:14px 0;font-size:13px"></div>
-        <div class="row"><button id="btn-respawn">REDEPLOY</button><button class="ghost" id="btn-quit2">QUIT TO MENU</button></div>
+        <div class="row"><button id="btn-respawn" data-i18n="dead.redeploy">REDEPLOY</button><button class="ghost" id="btn-quit2" data-i18n="dead.quit">QUIT TO MENU</button></div>
       </div></div>
     `;
     root.appendChild(hud);
@@ -72,15 +75,15 @@ export class HUD {
     inv.className = 'overlay';
     inv.innerHTML = `<div class="win panel">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <h2>INVENTORY</h2>
-        <div class="hint2">WEIGHT <b id="inv-weight">0</b> / <span id="inv-maxw">180</span> · SCRAP <b id="inv-scrap" style="color:var(--warn)">0</b></div>
+        <h2 data-i18n="inv.title">INVENTORY</h2>
+        <div class="hint2"><span data-i18n="inv.weight">WEIGHT</span> <b id="inv-weight">0</b> / <span id="inv-maxw">180</span> · <span data-i18n="inv.scrap">SCRAP</span> <b id="inv-scrap" style="color:var(--warn)">0</b></div>
       </div>
-      <div class="tabs"><div class="tab active" data-t="items">ITEMS</div><div class="tab" data-t="craft">CRAFT</div><div class="tab" data-t="guide">ITEM GUIDE</div></div>
+      <div class="tabs"><div class="tab active" data-t="items" data-i18n="inv.tab.items">ITEMS</div><div class="tab" data-t="craft" data-i18n="inv.tab.craft">CRAFT</div><div class="tab" data-t="guide" data-i18n="inv.tab.guide">ITEM GUIDE</div></div>
       <div id="inv-grid" class="inv-grid"></div>
       <div id="inv-craft" style="display:none"></div>
       <div id="inv-guide" style="display:none"></div>
-      <div class="hint2">LEFT-CLICK a consumable to USE it · an AMMO box to LOAD that ammo · an ATTACHMENT to FIT it to your current weapon · a MATERIAL to convert to scrap. Press <b>I</b> to close.</div>
-      <div class="row" style="margin-top:8px"><button id="btn-inv-close">CLOSE (I)</button></div>
+      <div class="hint2" data-i18n-html="inv.hint">LEFT-CLICK a consumable to USE it · an AMMO box to LOAD that ammo · an ATTACHMENT to FIT it to your current weapon · a MATERIAL to convert to scrap. Press <b>I</b> to close.</div>
+      <div class="row" style="margin-top:8px"><button id="btn-inv-close" data-i18n="inv.close">CLOSE (I)</button></div>
     </div>`;
     root.appendChild(inv);
     this.inv = inv;
@@ -91,12 +94,12 @@ export class HUD {
     ars.className = 'overlay';
     ars.innerHTML = `<div class="win panel">
       <div style="display:flex;justify-content:space-between;align-items:center">
-        <h2>ARSENAL</h2>
-        <div class="hint2">SCRAP <b id="ars-scrap" style="color:var(--warn)">0</b></div>
+        <h2 data-i18n="ars.title">ARSENAL</h2>
+        <div class="hint2"><span data-i18n="ars.scrap">SCRAP</span> <b id="ars-scrap" style="color:var(--warn)">0</b></div>
       </div>
       <div id="ars-list"></div>
-      <div class="hint2">Click an upgrade to buy a level with SCRAP. Equip attachments (owned as items) into the six slots. Weapon XP is earned by dealing damage and killing.</div>
-      <div class="row" style="margin-top:8px"><button id="btn-ars-close">CLOSE</button></div>
+      <div class="hint2" data-i18n="ars.hint">Click an upgrade to buy a level with SCRAP. Equip attachments (owned as items) into the six slots. Weapon XP is earned by dealing damage and killing.</div>
+      <div class="row" style="margin-top:8px"><button id="btn-ars-close" data-i18n="ars.close">CLOSE</button></div>
     </div>`;
     root.appendChild(ars);
     this.ars = ars;
@@ -112,59 +115,59 @@ export class HUD {
     menu.innerHTML = `
       <div class="box panel">
         <div class="ascii-logo">${ASCII_LOGO}</div>
-        <div class="hint" style="margin-bottom:14px">ASCII-ART 3D PVE SHOOTER // CO-OP VIA PUBLIC RELAY</div>
+        <div class="hint" style="margin-bottom:14px" data-i18n="menu.tagline">${t('menu.tagline')}</div>
         <div class="row">
-          <label class="field" style="flex:2">CALLSIGN<input id="in-name" maxlength="16" value="OPERATIVE-${Math.random().toString(36).slice(2,5).toUpperCase()}"></label>
-          <label class="field" style="flex:2">ROOM<input id="in-room" maxlength="24" value="ALPHA-01"></label>
+          <label class="field" style="flex:2"><span data-i18n="menu.callsign">${t('menu.callsign')}</span><input id="in-name" maxlength="16" value="OPERATIVE-${Math.random().toString(36).slice(2,5).toUpperCase()}"></label>
+          <label class="field" style="flex:2"><span data-i18n="menu.room">${t('menu.room')}</span><input id="in-room" maxlength="24" value="ALPHA-01"></label>
         </div>
         <div class="row">
-          <button class="clickable" id="btn-host">HOST CO-OP</button>
-          <button class="clickable ghost" id="btn-join">JOIN ROOM</button>
-          <button class="clickable ghost" id="btn-solo">SOLO PVE</button>
+          <button class="clickable" id="btn-host" data-i18n="menu.host">${t('menu.host')}</button>
+          <button class="clickable ghost" id="btn-join" data-i18n="menu.join">${t('menu.join')}</button>
+          <button class="clickable ghost" id="btn-solo" data-i18n="menu.solo">${t('menu.solo')}</button>
         </div>
         <div class="row">
-          <label class="field">DIFFICULTY
+          <label class="field"><span data-i18n="menu.difficulty">${t('menu.difficulty')}</span>
             <select id="in-diff">
-              <option value="0.8">RECRUIT</option>
-              <option value="1" selected>OPERATIVE</option>
-              <option value="1.35">VETERAN</option>
-              <option value="1.8">NIGHTMARE</option>
+              <option value="0.8" data-i18n="menu.diff.recruit">${t('menu.diff.recruit')}</option>
+              <option value="1" selected data-i18n="menu.diff.operative">${t('menu.diff.operative')}</option>
+              <option value="1.35" data-i18n="menu.diff.veteran">${t('menu.diff.veteran')}</option>
+              <option value="1.8" data-i18n="menu.diff.nightmare">${t('menu.diff.nightmare')}</option>
             </select>
           </label>
-          <label class="field">ENEMY DENSITY
+          <label class="field"><span data-i18n="menu.density">${t('menu.density')}</span>
             <select id="in-density">
-              <option value="0.7">LOW</option>
-              <option value="1" selected>NORMAL</option>
-              <option value="1.5">HIGH</option>
-              <option value="2.2">SWARM</option>
+              <option value="0.7" data-i18n="menu.density.low">${t('menu.density.low')}</option>
+              <option value="1" selected data-i18n="menu.density.normal">${t('menu.density.normal')}</option>
+              <option value="1.5" data-i18n="menu.density.high">${t('menu.density.high')}</option>
+              <option value="2.2" data-i18n="menu.density.swarm">${t('menu.density.swarm')}</option>
             </select>
           </label>
-          <label class="field">D&B TRACK
-            <select id="in-track">${TRACKS.map((t, i) => `<option value="${i}">${t.name}</option>`).join('')}</select>
+          <label class="field"><span data-i18n="menu.track">${t('menu.track')}</span>
+            <select id="in-track">${TRACKS.map((tr, i) => `<option value="${i}">${tr.name}</option>`).join('')}</select>
           </label>
         </div>
         <div class="row">
-          <label class="field" style="flex:1">ASCII CELL <input type="range" id="in-char" min="6" max="20" value="11"></label>
-          <label class="field" style="flex:1">MUSIC <input type="range" id="in-music" min="0" max="1" step="0.05" value="0.7"></label>
-          <label class="field" style="flex:1">SFX <input type="range" id="in-sfx" min="0" max="1" step="0.05" value="0.9"></label>
+          <label class="field" style="flex:1"><span data-i18n="menu.cell">${t('menu.cell')}</span> <input type="range" id="in-char" min="6" max="20" value="11"></label>
+          <label class="field" style="flex:1"><span data-i18n="menu.music">${t('menu.music')}</span> <input type="range" id="in-music" min="0" max="1" step="0.05" value="0.7"></label>
+          <label class="field" style="flex:1"><span data-i18n="menu.sfx">${t('menu.sfx')}</span> <input type="range" id="in-sfx" min="0" max="1" step="0.05" value="0.9"></label>
         </div>
         <div class="row">
-          <label class="field" style="flex:1">GLYPH RAMP
+          <label class="field" style="flex:1"><span data-i18n="menu.ascii">${t('menu.ascii')}</span><input type="checkbox" id="in-ascii" checked></label>
+          <label class="field" style="flex:1"><span data-i18n="menu.ramp">${t('menu.ramp')}</span>
             <select id="in-ramp">
-              <option value="0">DENSE</option>
-              <option value="1">TERMINAL</option>
+              <option value="0" data-i18n="menu.ramp.dense">${t('menu.ramp.dense')}</option>
+              <option value="1" data-i18n="menu.ramp.terminal">${t('menu.ramp.terminal')}</option>
             </select>
           </label>
-          <label class="field" style="flex:1">TINT<input type="checkbox" id="in-color" checked></label>
-          <label class="field" style="flex:1">EDGE GLYPHS<input type="checkbox" id="in-edge" checked></label>
+          <label class="field" style="flex:1"><span data-i18n="menu.tint">${t('menu.tint')}</span><input type="checkbox" id="in-color" checked></label>
+          <label class="field" style="flex:1"><span data-i18n="menu.edge">${t('menu.edge')}</span><input type="checkbox" id="in-edge" checked></label>
+          <label class="field" style="flex:1"><span data-i18n="menu.language">${t('menu.language')}</span>
+            <select id="in-lang">${LANGS.map(l => `<option value="${l.id}"${l.id === getLang() ? ' selected' : ''}>${l.label}</option>`).join('')}</select>
+          </label>
         </div>
-        <div class="hint" id="menu-status" style="margin-top:10px">Ready.</div>
-        <div class="hint" style="margin-top:8px">
-          WASD move · MOUSE look · CLICK fire · RMB aim · SHIFT sprint · CTRL/C crouch · SPACE jump · 1-7 weapons · R reload · G grenade · TAB map · ESC pause
-        </div>
-        <div class="hint" style="margin-top:6px;opacity:.5">
-          CO-OP uses public MQTT relays. Self-host with <b>npm run relay</b>, then open <b>/?broker=ws://YOUR-IP:8888</b>
-        </div>
+        <div class="hint" id="menu-status" style="margin-top:10px" data-i18n="menu.ready">${t('menu.ready')}</div>
+        <div class="hint" style="margin-top:8px" data-i18n="menu.controls">${t('menu.controls')}</div>
+        <div class="hint" style="margin-top:6px;opacity:.5" data-i18n-html="menu.relayHint">${t('menu.relayHint')}</div>
       </div>
     `;
     root.appendChild(menu);
@@ -175,6 +178,21 @@ export class HUD {
   hideMenu() { this.menu.classList.add('hidden'); this.hud.classList.add('on'); }
   setMenuStatus(t) { const e = this.menu.querySelector('#menu-status'); if (e) e.textContent = t; }
   setHudVisible(on) { this.hud.classList.toggle('on', on); }
+
+  /** Re-apply translated labels to static chrome after a language change. */
+  refreshLanguage() {
+    for (const el of this.root.querySelectorAll('[data-i18n]')) {
+      const key = el.dataset.i18n;
+      if (key) el.textContent = t(key);
+    }
+    for (const el of this.root.querySelectorAll('[data-i18n-html]')) {
+      const key = el.dataset.i18nHtml;
+      if (key) el.innerHTML = t(key);
+    }
+    document.documentElement.lang = getLang();
+    if (this._invOpen && this._game) this._renderInventory(this._game);
+    if (this._arsOpen && this._game) this._renderArsenal(this._game);
+  }
 
   showPause(on) { this.hud.querySelector('#pause').classList.toggle('on', on); }
   showDead(on, stats) {
@@ -231,38 +249,41 @@ export class HUD {
 
     const hpBar = bar(p.health, p.maxHealth, 20);
     const arBar = bar(p.armor, p.maxArmor, 20);
-    const shLine = p.shield > 0 ? `<div>SH <span class="bar">${bar(p.shield, p.maxShield, 20)}</span> ${Math.ceil(p.shield)}</div>` : '';
+    const shLine = p.shield > 0 ? `<div>${t('hud.sh')} <span class="bar">${bar(p.shield, p.maxShield, 20)}</span> ${Math.ceil(p.shield)}</div>` : '';
     const dname = game.district ? game.district.name : '';
     const dcol = game.district ? hex(game.district.color) : 'var(--fg)';
-    const luckLine = (game.luck || game.scavenger) ? `<div style="opacity:.75">LUCK +${(game.luck || 0).toFixed(2)} · SCAV +${Math.round((game.scavenger || 0) * 100)}%</div>` : '';
+    const luckLine = (game.luck || game.scavenger) ? `<div style="opacity:.75">${t('hud.luckLine', { luck: (game.luck || 0).toFixed(2), scav: Math.round((game.scavenger || 0) * 100) })}</div>` : '';
     this._set('hud-tl',
       `<div style="color:var(--accent);font-size:13px">BDSC // GRIDFALL</div>
        <div style="color:${dcol};margin-top:2px">${dname}</div>
-       <div style="margin-top:6px">HP <span class="bar">${hpBar}</span> ${Math.ceil(p.health)}</div>
-       <div>AR <span class="bar">${arBar}</span> ${Math.ceil(p.armor)}</div>
+       <div style="margin-top:6px">${t('hud.hp')} <span class="bar">${hpBar}</span> ${Math.ceil(p.health)}</div>
+       <div>${t('hud.ar')} <span class="bar">${arBar}</span> ${Math.ceil(p.armor)}</div>
        ${shLine}
-       <div style="margin-top:6px;opacity:.75">THREAT LV ${game.wave} · HOSTILES ${game.enemies.countAlive()}</div>
-       <div style="opacity:.75">SCRAP <b style="color:var(--warn)">${game.progression.scrap}</b></div>
+       <div style="margin-top:6px;opacity:.75">${t('hud.threat', { lv: game.wave, n: game.enemies.countAlive() })}</div>
+       <div style="opacity:.75">${t('hud.scrap')} <b style="color:var(--warn)">${game.progression.scrap}</b></div>
        ${luckLine}`
     );
-    const ammo = def.ammoName || 'STANDARD';
-    const ammoCol = def.ammoColor != null ? hex(def.ammoColor) : 'var(--fg)';
+    const ad = ammoDef(w.weapon.ammoType || 'standard');
+    const ammo = ad.name;
+    const ammoCol = ad.color != null ? hex(ad.color) : 'var(--fg)';
     this._set('hud-tr',
       `<div style="font-size:15px;color:var(--accent)">${def.name}</div>
-       <div style="opacity:.8">${def.cat} · LV ${def.level || 1}</div>
-       <div style="margin-top:4px;font-size:20px">${w.reloading ? 'RELOAD…' : wstate.ammo + ' / ' + wstate.reserve}</div>
+       <div style="opacity:.8">${w.baseDef.cat} · ${t('hud.level', { lv: def.level || 1 })}</div>
+       <div style="margin-top:4px;font-size:20px">${w.reloading ? t('hud.reload') : wstate.ammo + ' / ' + wstate.reserve}</div>
        <div style="color:${ammoCol}">◈ ${ammo}</div>
        <div style="opacity:.7">FPS ${game.fps}</div>`
     );
     this._set('hud-bl',
-      `<div>KILLS <b>${game.kills}</b> · SCORE <b>${game.score}</b></div>
-       <div>ACC ${game.shots > 0 ? Math.round(game.hits / game.shots * 100) : 0}% · HEAD ${game.headshots}</div>
-       <div style="opacity:.7">GRENADES ${game.grenades} · ${(game.grenadeKind || 'frag').toUpperCase()}</div>`
+      `<div>${t('hud.kills', { kills: game.kills, score: game.score })}</div>
+       <div>${t('hud.acc', { acc: game.shots > 0 ? Math.round(game.hits / game.shots * 100) : 0, head: game.headshots })}</div>
+       <div style="opacity:.7">${t('hud.grenades', { n: game.grenades, kind: grenadeName(game.grenadeKind || 'frag') })}</div>`
     );
     this._set('hud-bc',
       `<div style="opacity:.85">${w.weapons.map((ww, i) => i === w.index ? `[<span style="color:var(--accent)">${i + 1}${ww.base.name.slice(0,6)}</span>]` : `${i + 1}${ww.base.name.slice(0,3)}`).join(' ')}</div>`
     );
-    this._set('hud-br', game.net && game.net.enabled ? `ROOM ${game.net.room.toUpperCase()}<br>PING ${game.net.ping}ms · ${game.net.players.size + 1} ONLINE` : 'OFFLINE · SOLO');
+    this._set('hud-br', game.net && game.net.enabled
+      ? t('hud.online', { room: game.net.room.toUpperCase(), ping: game.net.ping, n: game.net.players.size + 1 })
+      : t('hud.offline'));
 
     // quickbar (Z X C V B N M)
     const keys = ['Z', 'X', 'C', 'V', 'B', 'N', 'M'];
@@ -280,16 +301,16 @@ export class HUD {
 
     // status chips
     const chips = [];
-    for (const k in p.statuses) { chips.push(`<div class="chip" style="border-color:${statusColor(k)}">${k.toUpperCase()} <span class="t">${Math.ceil(p.statuses[k].t)}s</span></div>`); }
-    for (const b of game.buffs.list()) { chips.push(`<div class="chip">${b.label} <span class="t">${Math.ceil(b.remaining)}s</span></div>`); }
-    if (game.revealActive) chips.push(`<div class="chip" style="border-color:var(--accent2)">${String(game.reveal.mode).toUpperCase()} ACTIVE</div>`);
+    for (const k in p.statuses) { chips.push(`<div class="chip" style="border-color:${statusColor(k)}">${statusName(k)} <span class="t">${Math.ceil(p.statuses[k].t)}s</span></div>`); }
+    for (const b of game.buffs.list()) { chips.push(`<div class="chip">${buffName(b.label)} <span class="t">${Math.ceil(b.remaining)}s</span></div>`); }
+    if (game.revealActive) chips.push(`<div class="chip" style="border-color:var(--accent2)">${t('hud.reveal', { mode: revealName(game.reveal.mode) })}</div>`);
     const sce = this.hud.querySelector('#statuschips');
     if (sce) sce.innerHTML = chips.join('');
 
     const obj = this.hud.querySelector('#objective');
-    if (game.objectiveText) obj.innerHTML = `<div class="t">OBJECTIVE</div><div>${game.objectiveText}</div>`;
+    if (game.objectiveText) obj.innerHTML = `<div class="t">${t('hud.objective')}</div><div>${game.objectiveText}</div>`;
     const ns = this.hud.querySelector('#netstat');
-    ns.textContent = game.net && game.net.enabled ? `RELAY ${game.net.broker || ''}` : '';
+    ns.textContent = game.net && game.net.enabled ? t('hud.relay', { name: game.net.broker || '' }) : '';
 
     // crosshair by spread
     const ch = this.hud.querySelector('#crosshair');
@@ -411,18 +432,20 @@ export class HUD {
         const chk = canCraft(inv, game.progression.scrap, r.id);
         const out = ITEMS_BY_ID[r.out.id];
         const costItems = Object.entries(r.cost.items).map(([k, n]) => `${ITEMS_BY_ID[k] ? ITEMS_BY_ID[k].name : k}×${n}`).join(' + ');
-        h += `<div class="rec ${chk.ok ? '' : 'no'}"><div style="flex:1"><b style="color:${hex(out.rarityColor)}">${out.icon} ${out.name} ×${r.out.count}</b><div class="hint2">${costItems} + ${r.cost.scrap} SCRAP</div></div><div class="recbtn" data-craft="${r.id}">CRAFT</div></div>`;
+        h += `<div class="rec ${chk.ok ? '' : 'no'}"><div style="flex:1"><b style="color:${hex(out.rarityColor)}">${out.icon} ${out.name} ×${r.out.count}</b><div class="hint2">${costItems} + ${r.cost.scrap} ${t('inv.scrap')}</div></div><div class="recbtn" data-craft="${r.id}">${t('inv.craft')}</div></div>`;
       }
       craftEl.innerHTML = h;
       return;
     }
     grid.style.display = 'grid';
+    const maxName = getLang() === 'zh' ? 8 : 13;
     let html = '';
     for (let i = 0; i < inv.capacity; i++) {
       const s = inv.slots[i];
       if (!s) { html += `<div class="slot empty"></div>`; continue; }
       const def = ITEMS_BY_ID[s.id] || { name: s.id, category: '', rarity: 'common', icon: '?' };
-      html += `<div class="slot ${def.rarity}" data-slot="${s.id}" title="${def.name} — ${def.desc || ''}">${def.icon || '?'}<span class="cnt">${s.count > 1 ? s.count : ''}</span><span class="nm">${def.name.length > 13 ? def.name.slice(0, 12) + '…' : def.name}</span></div>`;
+      const nm = (def.name || '').length > maxName ? def.name.slice(0, maxName - 1) + '…' : def.name;
+      html += `<div class="slot ${def.rarity}" data-slot="${s.id}" title="${def.name} — ${def.desc || ''}">${def.icon || '?'}<span class="cnt">${s.count > 1 ? s.count : ''}</span><span class="nm">${nm}</span></div>`;
     }
     grid.innerHTML = html;
   }
@@ -442,11 +465,11 @@ export class HUD {
       const s = w.stats;
       html += `<div class="wep-row ${i === sel ? 'sel' : ''}" data-wep="${id}">`;
       html += `<div class="wep-head"><span>${i + 1}. <b>${w.base.name}</b> <span style="opacity:.6">${w.base.cat}</span></span>`;
-      html += `<span>LV <b>${st.level}</b>${st.level >= MAX_WEAPON_LEVEL ? ' (MAX)' : ` · ${Math.round(st.xp)}/${xpNeed}`} · <b style="color:var(--accent)">${st.mp} MP</b></span></div>`;
+      html += `<span>${t('ars.lv')} <b>${st.level}</b>${st.level >= MAX_WEAPON_LEVEL ? ' ' + t('ars.max') : ` · ${Math.round(st.xp)}/${xpNeed}`} · <b style="color:var(--accent)">${t('ars.mp', { n: st.mp })}</b></span></div>`;
       html += `<div class="xpbar"><i style="width:${xpPct}%"></i></div>`;
-      html += `<div style="font-size:11px;opacity:.8">DMG ${s.dmg.toFixed(1)} · RATE ${Math.round(s.rpm)} · MAG ${s.mag} · CRIT ${(s.crit * 100).toFixed(0)}% · PEN ${((s.pen || 0) * 100).toFixed(0)}%`;
-      if (s.scavenger) html += ` · SCAV +${(s.scavenger * 100).toFixed(0)}%`;
-      if (s.luck) html += ` · LUCK +${s.luck.toFixed(2)}`;
+      html += `<div style="font-size:11px;opacity:.8">${t('ars.stats', { dmg: s.dmg.toFixed(1), rate: Math.round(s.rpm), mag: s.mag, crit: (s.crit * 100).toFixed(0), pen: ((s.pen || 0) * 100).toFixed(0) })}`;
+      if (s.scavenger) html += t('ars.scav', { v: (s.scavenger * 100).toFixed(0) });
+      if (s.luck) html += t('ars.luck', { v: s.luck.toFixed(2) });
       html += `</div>`;
       // branches
       html += `<div class="tree">`;
@@ -471,9 +494,10 @@ export class HUD {
       for (const slot of ['muzzle', 'optic', 'magazine', 'underbarrel', 'grip']) {
         const cur = w.attachments[slot];
         const def = cur ? ITEMS_BY_ID[cur] : null;
-        html += `<div class="att ${cur ? 'filled' : ''}" data-wid="${id}" data-att="${slot}" title="${cur ? 'Click to remove ' + def.name : 'Click to fit an owned ' + slot + ' attachment'}">${slot.toUpperCase()}: ${def ? def.name : '—'}</div>`;
+        const title = cur ? t('ars.attRemove', { name: def.name }) : t('ars.attFit', { slot: slotName(slot) });
+        html += `<div class="att ${cur ? 'filled' : ''}" data-wid="${id}" data-att="${slot}" title="${title}">${slotName(slot)}: ${def ? def.name : '—'}</div>`;
       }
-      html += `<div class="att respec" data-wid="${id}" data-respec="1" title="Refund all mod points for ${prog.respecCost(id)} scrap">RESPEC (${prog.respecCost(id)})</div>`;
+      html += `<div class="att respec" data-wid="${id}" data-respec="1" title="${t('ars.respecTitle', { n: prog.respecCost(id) })}">${t('ars.respec', { n: prog.respecCost(id) })}</div>`;
       html += `</div>`;
       html += `</div>`;
     });

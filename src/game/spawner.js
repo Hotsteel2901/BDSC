@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { districtAt } from './districts.js';
+import { t } from '../ui/i18n.js';
 
 /**
  * SpawnDirector
@@ -35,7 +36,7 @@ export class SpawnDirector {
     this.minSpawnR = 46;
     this.maxSpawnR = 96;
     this.maxAlive = 46;
-    this._objective = 'CONTACT IMMINENT';
+    this._objective = t('obj.contact');
     this.surgeCount = 0;
     this.onSurge = null;
     this.lastReport = 0;
@@ -109,7 +110,7 @@ export class SpawnDirector {
     // ---- objective / status text ----
     if (this.time - this.lastReport > 0.5) {
       this.lastReport = this.time;
-      this._objective = `THREAT LV ${Math.floor(this.threat)} · HOSTILES ${alive}`;
+      this._objective = t('obj.threat', { t: Math.floor(this.threat), n: alive });
     }
   }
 

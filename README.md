@@ -196,6 +196,10 @@ src/
     net.js               public-relay co-op (MQTT over WebSocket)
   ui/
     hud.js               menu, HUD, minimap, killfeed, toasts
+    i18n.js              language state + EN/ZH UI strings
+    localize.js          in-place registry translations (items, tree, ...)
+    lang/zh-content.js   Simplified Chinese content dictionary
+    fonts/               subset Fusion Pixel CJK font + OFL license
     style.css
 server/
   relay.js                optional self-hosted Aedes MQTT-over-WS relay
@@ -213,7 +217,15 @@ test/
    aberration, film grain and a damage overlay.
 
 Tune it live from the menu: **ASCII CELL** size, **GLYPH RAMP** (dense or terminal),
-**TINT** and **EDGE GLYPHS**.
+**TINT** and **EDGE GLYPHS**. Prefer plain 3D? **ASCII RENDER** switches the whole
+glyph pipeline off (raw scene, no scanlines/vignette) and the choice is remembered.
+
+### Languages
+The interface ships in **English (default)** and **简体中文** — pick one under
+**LANGUAGE** in the menu and it is remembered. All UI chrome, item/weapon/tree
+content, statuses, districts and messages are translated. The Chinese UI uses
+**Fusion Pixel 12px Mono**, a pixel/bitmap CJK font chosen to match the ASCII
+terminal aesthetic (subset to the glyphs the game actually uses; SIL OFL 1.1).
 
 ---
 
@@ -235,6 +247,9 @@ Tune it live from the menu: **ASCII CELL** size, **GLYPH RAMP** (dense or termin
 
 Design, code, art and audio generated procedurally — no third-party game assets.
 Built with [three.js](https://threejs.org/) and [mqtt.js](https://github.com/mqttjs/MQTT.js).
+Chinese UI font: [Fusion Pixel Font](https://github.com/TakWolf/fusion-pixel-font) by
+TakWolf (SIL OFL 1.1), subset to the glyphs this game uses — license and component
+licenses in `src/ui/fonts/`.
 
 ---
 

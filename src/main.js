@@ -23,9 +23,13 @@ import { ITEMS_BY_ID } from './game/items/registry.js';
 import { applyItemEffect } from './game/items/effects.js';
 import { districtAt } from './game/districts.js';
 import { craft } from './game/crafting.js';
+import { t, getLang, setLang } from './ui/i18n.js';
+import { applyContentLanguage, enemyName, weaponName } from './ui/localize.js';
 
 class Game {
   constructor() {
+    applyContentLanguage();
+    document.documentElement.lang = getLang();
     this.canvas = document.getElementById('gl');
     this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: false, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(1);
@@ -96,13 +100,13 @@ class Game {
       this.progression.addScrap(Math.round((enemy.type.xp || 10) * 1.6));
       if (this.spawner) this.spawner.onKill();
       if (this.loot) this.loot.dropAt(enemy.pos, enemy.typeKey || 'grunt', enemy.elite);
-      this.hud.killFeed(`<span style="color:var(--accent)">YOU</span> ▸ ${enemy.type.name}${head ? ' ⌖' : ''}`);
+      this.hud.killFeed(`<span style="color:var(--accent)">${t('hud.you')}</span> ▸ ${enemyName(enemy.typeKey || enemy.type.name)}${head ? ' ⌖' : ''}`);
     };
     this.loot.onPickup = (def, got) => {
-      this.hud.toast(`+${got} ${def.name}`);
+      this.hud.toast(t('msg.pickup', { n: got, name: def.name }));
     };
     this.progression.onLevelUp = (id, lvl) => {
-      this.hud.toast(`${id.toUpperCase()} REACHED LV.${lvl}`);
+      this.hud.toast(t('msg.levelUp', { weapon: weaponName(id), lvl }));
       if (this.audio) this.audio.killConfirm();
     };
     this.progression.onScrap = (n) => { /* HUD polls progression.scrap */ };
@@ -117,7 +121,7 @@ class Game {
     this.pickups = [];
     this.avatarGroup = new THREE.Group();
     this.scene.add(this.avatarGroup);
-    this.objectiveText = 'AWAITING DEPLOYMENT';
+    this.objectiveText = t('obj.awaiting');
     this.config = { difficulty: 1, density: 1, track: 0 };
     this._lastChunks = 0;
     this._netAcc = 0;
@@ -173,7 +177,28 @@ class Game {
 
   _bindUI() {
     const $ = (id) => document.getElementById(id);
+
+    // ASCII rendering is optional — some players prefer the raw 3D view.
+    // The choice persists across sessions, and the ASCII-only controls are
+    // greyed out while it is off.
+    const asciiOnly = ['in-char', 'in-ramp', 'in-color', 'in-edge'];
+    const syncAsciiControls = () => {
+      const on = $('in-ascii').checked;
+      for (const id of asciiOnly) {
+        const el = $(id);
+        el.disabled = !on;
+        const label = el.closest('label');
+        if (label) label.style.opacity = on ? '' : '0.4';
+      }
+    };
+    if (localStorage.getItem('bdsc_ascii') === '0') $('in-ascii').checked = false;
+    this.composer.enabled = $('in-ascii').checked;
+    syncAsciiControls();
+
     const applySettings = () => {
+      this.composer.enabled = $('in-ascii').checked;
+      localStorage.setItem('bdsc_ascii', this.composer.enabled ? '1' : '0');
+      syncAsciiControls();
       this.composer.charSize = parseInt($('in-char').value, 10);
       this.composer.setSize(window.innerWidth, window.innerHeight);
       this.audio.setVolumes({ music: parseFloat($('in-music').value), sfx: parseFloat($('in-sfx').value) });
@@ -182,7 +207,7 @@ class Game {
       this.composer.edge = $('in-edge').checked;
       this.composer.material.uniforms.uEdge.value = this.composer.edge ? 1 : 0;
     };
-    ['in-char', 'in-ramp', 'in-color', 'in-edge', 'in-music', 'in-sfx'].forEach(id => {
+    ['in-char', 'in-ramp', 'in-color', 'in-edge', 'in-ascii', 'in-music', 'in-sfx'].forEach(id => {
       $(id).addEventListener('input', () => {
         if (id === 'in-ramp') this._reloadRamp();
         else applySettings();
@@ -194,8 +219,13 @@ class Game {
     $('btn-join').addEventListener('click', () => this.startGame({ host: false, joinOnly: true }));
     $('btn-solo').addEventListener('click', () => this.startGame({ solo: true }));
     $('in-track').addEventListener('change', () => {
-      const t = this.dnb.setTrack(parseInt($('in-track').value, 10));
-      if (t) this.hud.setMenuStatus('Now playing: ' + t.name);
+      const track = this.dnb.setTrack(parseInt($('in-track').value, 10));
+      if (track) this.hud.setMenuStatus(t('menu.status.playing', { name: track.name }));
+    });
+    $('in-lang').addEventListener('change', () => {
+      if (!setLang($('in-lang').value)) return;
+      applyContentLanguage();
+      this.hud.refreshLanguage();
     });
     $('btn-resume').addEventListener('click', () => this.setPaused(false));
     $('btn-arsenal').addEventListener('click', () => this.openArsenal());
@@ -223,13 +253,13 @@ class Game {
 
   _bindNet() {
     const net = this.net;
-    net.on('playerJoin', (p) => { this._ensureAvatar(p); this.hud.toast(`${p.name} JOINED`); });
+    net.on('playerJoin', (p) => { this._ensureAvatar(p); this.hud.toast(t('msg.playerJoin', { name: p.name })); });
     net.on('playerLeave', (msg) => {
-      this.hud.toast(`${msg.name} LEFT`);
+      this.hud.toast(t('msg.playerLeave', { name: msg.name }));
       const p = net.players.get(msg.from);
       if (p && p.mesh) this.avatarGroup.remove(p.mesh);
     });
-    net.on('here', (msg) => { if (!net.isHost) {} this.hud.setMenuStatus(`${msg.name} is in this room.`); });
+    net.on('here', (msg) => { if (!net.isHost) {} this.hud.setMenuStatus(t('menu.status.here', { name: msg.name })); });
     net.on('snapshot', (arr) => { if (!this.net.isHost) this.enemies.applySnapshot(arr); });
     net.on('hitReport', (msg) => {
       if (!this.net.isHost) return;
@@ -248,11 +278,11 @@ class Game {
       const to = new THREE.Vector3(msg.tx, msg.ty, msg.tz);
       this.effects.tracer(from, to, [1, 0.5, 0.2], 0.06);
     });
-    net.on('killFeed', (msg) => { this.hud.killFeed(`<span style="color:var(--accent)">${msg.k}</span> ▸ ${msg.et}${msg.h ? ' ⌖' : ''}`); });
+    net.on('killFeed', (msg) => { this.hud.killFeed(`<span style="color:var(--accent)">${msg.k}</span> ▸ ${enemyName(msg.et)}${msg.h ? ' ⌖' : ''}`); });
     net.on('chat', (msg) => { this.hud.toast(`${msg.name}: ${msg.m}`); });
     net.on('objective', (msg) => { this.objectiveText = msg.m; });
-    net.on('disconnected', () => { this.hud.toast('RELAY DISCONNECTED'); });
-    net.on('reconnected', () => { this.hud.toast('RELAY RESTORED'); });
+    net.on('disconnected', () => { this.hud.toast(t('msg.relayDown')); });
+    net.on('reconnected', () => { this.hud.toast(t('msg.relayUp')); });
   }
 
   _ensureAvatar(p) {
@@ -276,20 +306,20 @@ class Game {
     };
 
     if (!opts.solo) {
-      this.hud.setMenuStatus('Connecting to public relay…');
+      this.hud.setMenuStatus(t('menu.status.connecting'));
       try {
         const res = await this.net.join(
           document.getElementById('in-room').value,
           document.getElementById('in-name').value,
           { host: !!opts.host }
         );
-        this.hud.setMenuStatus(`Connected via ${res.broker}. ${opts.host ? 'You are HOST.' : 'You are CLIENT.'}`);
+        this.hud.setMenuStatus(t(opts.host ? 'menu.status.host' : 'menu.status.client', { broker: res.broker }));
         if (!opts.host) {
           // demote: wait for host snapshots
           this._isClient = true;
         }
       } catch (e) {
-        this.hud.setMenuStatus('Relay unavailable — starting solo. (' + this.net.lastError + ')');
+        this.hud.setMenuStatus(t('menu.status.relayFail', { err: this.net.lastError }));
       }
     }
 
@@ -326,8 +356,8 @@ class Game {
     this.player.shield = 0; this.player.shieldDecay = 0;
     const spawn = this.world.findStreetSpawn(this.player.pos.x + 4, this.player.pos.z + 4);
     this.player.reset(spawn, Math.PI * 0.25);
-    this.objectiveText = 'HOSTILES INBOUND';
-    this.hud.toast(opts.solo ? 'SOLO DEPLOYMENT — ENDLESS ASSAULT' : (this._isHost ? 'HOSTING CO-OP — ENDLESS ASSAULT' : 'JOINED CO-OP'));
+    this.objectiveText = t('obj.inbound');
+    this.hud.toast(opts.solo ? t('msg.solo') : (this._isHost ? t('msg.hosting') : t('msg.joined')));
   }
 
   setPaused(on) {
@@ -399,7 +429,7 @@ class Game {
       const d = ITEMS_BY_ID[s.id];
       if (d && d.use && d.use.type === 'use' && d.use.effect === 'heal') { this.useItemId(s.id); return; }
     }
-    this.hud.toast('NO HEALING ITEMS');
+    this.hud.toast(t('msg.noHeal'));
   }
 
   setReveal(mode, dur, radius = 90) {
@@ -413,7 +443,7 @@ class Game {
     const id = this.weaponSystem.baseDef.id;
     this.progression.addModPoints(id, n);
     this.weaponSystem.recompute(this.weaponSystem.weapon);
-    this.hud.toast(`+${n} MOD POINT${n > 1 ? 'S' : ''} · ${this.weaponSystem.baseDef.name}`);
+    this.hud.toast(t('msg.modPoints', { n, weapon: this.weaponSystem.baseDef.name }));
   }
 
   craftRecipe(id) {
@@ -520,7 +550,7 @@ class Game {
       if (this._isHost) {
         this.spawner.update(dt, {
           player: this.player, density: this.config.density, threatMul: this.config.difficulty,
-          onSurge: (n, threat, dname) => { this.hud.toast(`SURGE — ${n} HOSTILES · ${dname || ''}`); },
+          onSurge: (n, threat, dname) => { this.hud.toast(t('msg.surge', { n, dname: dname || '' })); },
         });
         this.wave = Math.floor(this.spawner.threat);
         this.objectiveText = this.spawner.objective;
@@ -547,7 +577,7 @@ class Game {
     if (active && !this.player.alive) {
       this.state = 'dead';
       this.hud.showDead(true,
-        `WAVE <b>${this.wave}</b> · KILLS <b>${this.kills}</b> · HEADSHOTS <b>${this.headshots}</b><br>SCORE <b>${this.score}</b>`);
+        t('dead.stats', { wave: this.wave, kills: this.kills, heads: this.headshots, score: this.score }));
       this.input.exitLock();
       this.dnb.setIntensity(0.6);
     }

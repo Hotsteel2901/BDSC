@@ -1,4 +1,5 @@
 import { ITEMS_BY_ID } from './items/registry.js';
+import { t } from '../ui/i18n.js';
 
 /**
  * Crafting — converts looted materials + scrap into ammo, attachments, modules
@@ -36,7 +37,7 @@ export function canCraft(inv, scrap, id) {
   const r = recipe(id);
   if (!r) return { ok: false, why: 'UNKNOWN' };
   if (scrap < r.cost.scrap) return { ok: false, why: 'SCRAP' };
-  for (const k in r.cost.items) if (!inv.has(k, r.cost.items[k])) return { ok: false, why: 'MISSING ' + (ITEMS_BY_ID[k] ? ITEMS_BY_ID[k].name : k) };
+  for (const k in r.cost.items) if (!inv.has(k, r.cost.items[k])) return { ok: false, why: 'MISSING:' + (ITEMS_BY_ID[k] ? ITEMS_BY_ID[k].name : k) };
   let room = inv.maxAdd(r.out.id, r.out.count);
   if (room < r.out.count) {
     const stack = ITEMS_BY_ID[r.out.id].stack || 1;
@@ -51,18 +52,25 @@ export function canCraft(inv, scrap, id) {
       }
     }
   }
-  if (room < r.out.count) return { ok: false, why: 'INVENTORY FULL' };
+  if (room < r.out.count) return { ok: false, why: 'FULL' };
   return { ok: true, why: '' };
 }
 
 /** Perform a craft. Returns { ok, msg }. */
 export function craft(game, id) {
   const r = recipe(id);
-  if (!r) return { ok: false, msg: 'UNKNOWN RECIPE' };
+  if (!r) return { ok: false, msg: t('craft.unknown') };
   const chk = canCraft(game.inventory, game.progression.scrap, id);
-  if (!chk.ok) return { ok: false, msg: chk.why === 'SCRAP' ? 'NOT ENOUGH SCRAP' : chk.why };
+  if (!chk.ok) {
+    let msg = chk.why;
+    if (chk.why === 'SCRAP') msg = t('craft.noScrap');
+    else if (chk.why === 'FULL') msg = t('craft.invFull');
+    else if (chk.why === 'UNKNOWN') msg = t('craft.unknown');
+    else if (chk.why.startsWith('MISSING:')) msg = t('craft.missing', { name: chk.why.slice(8) });
+    return { ok: false, msg };
+  }
   game.progression.scrap -= r.cost.scrap;
   for (const k in r.cost.items) game.inventory.remove(k, r.cost.items[k]);
   game.inventory.add(r.out.id, r.out.count);
-  return { ok: true, msg: `CRAFTED ${r.out.count}× ${ITEMS_BY_ID[r.out.id].name}` };
+  return { ok: true, msg: t('craft.done', { n: r.out.count, name: ITEMS_BY_ID[r.out.id].name }) };
 }

@@ -1228,7 +1228,7 @@ export class EnemyManager {
     const d = dir ? new THREE.Vector3(dir.x, dir.y, dir.z) : new THREE.Vector3(0, 0, 1);
     this.damage(e, amount, p, d, head, src);
     if (this.net && this.net.isHost && !e.alive) {
-      this.net.sendKill(e.type.name, 'REMOTE', head);
+      this.net.sendKill(e.typeKey || e.type.name, 'REMOTE', head);
     }
   }
 
@@ -1236,7 +1236,7 @@ export class EnemyManager {
   _onDotKill(enemy, ctx) {
     if (this.audio) this.audio.enemyDeath(enemy.type.flying ? 'drone' : 'grunt');
     if (this.audio) this.audio.killConfirm();
-    if (this.net && this.net.isHost) this.net.sendKill(enemy.type.name, this.net.name, false);
+    if (this.net && this.net.isHost) this.net.sendKill(enemy.typeKey || enemy.type.name, this.net.name, false);
     if (this.onKill) this.onKill(enemy, false);
   }
 
@@ -1287,7 +1287,7 @@ export class EnemyManager {
       this.effects.shockRing(enemy.center, 0xffaa44, 0.4, 14);
       if (this.audio) this.audio.enemyDeath(enemy.type.flying ? 'drone' : 'grunt');
       if (this.audio) this.audio.killConfirm();
-      if (this.net && this.net.isHost) this.net.sendKill(enemy.type.name, this.net.name, head);
+      if (this.net && this.net.isHost) this.net.sendKill(enemy.typeKey || enemy.type.name, this.net.name, head);
       if (this.onKill) this.onKill(enemy, head);
     } else {
       if (this.audio) this.audio.impact('flesh', 0);
