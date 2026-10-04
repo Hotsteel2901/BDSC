@@ -3,3 +3,7 @@ dist/
 *.log
 .DS_Store
 test/*.png
+
+# VibeHub publish artifacts / generated MIDI (keep the GitHub tree clean)
+.vibehub/
+midi/

@@ -264,10 +264,12 @@ export class Player {
     const dx = this.vel.x * dt, dz = this.vel.z * dt;
     const hSteps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.2));
     for (let s = 0; s < hSteps; s++) {
+      const px = this.pos.x;
       this.pos.x += dx / hSteps;
-      this._resolve('x', r);
+      this._resolve('x', r, px);
+      const pz = this.pos.z;
       this.pos.z += dz / hSteps;
-      this._resolve('z', r);
+      this._resolve('z', r, pz);
     }
     // vertical
     this.landImpact = this.vel.y;
@@ -286,14 +288,19 @@ export class Player {
     return this.world.queryColliders(min, max, this._buf, this._seen);
   }
 
-  _resolve(axis, r) {
+  _resolve(axis, r, prev) {
+    const EPS = 1e-4;
     const list = this._collect(r);
     for (const b of list) {
       const ex0 = b.min.x - r, ex1 = b.max.x + r;
       const ez0 = b.min.z - r, ez1 = b.max.z + r;
       const ey0 = b.min.y, ey1 = b.max.y;
-      if (this.pos.x < ex0 || this.pos.x > ex1) continue;
-      if (this.pos.z < ez0 || this.pos.z > ez1) continue;
+      // Sitting exactly on an expanded face is *touching*, not overlapping:
+      // without this, the axis resolved first would leave the player on the
+      // boundary and the second axis would then shove them along the wall to
+      // the box's far end (the "teleported to a corner" bug).
+      if (this.pos.x <= ex0 + EPS || this.pos.x >= ex1 - EPS) continue;
+      if (this.pos.z <= ez0 + EPS || this.pos.z >= ez1 - EPS) continue;
       if (this.pos.y + this.height <= ey0 + 0.001 || this.pos.y >= ey1 - 0.001) continue;
 
       // Try step-up, but only while actually grounded: a small kerb/stair is
@@ -308,13 +315,21 @@ export class Player {
         this.vel.y = Math.max(0, this.vel.y);
         continue;
       }
+      // Push out against the face we entered through (fall back to the
+      // nearest face only if we were already inside before this step).
       if (axis === 'x') {
-        const pen = (this.pos.x < (ex0 + ex1) / 2) ? (ex0 - this.pos.x) : (ex1 - this.pos.x);
-        this.pos.x += pen;
+        let target;
+        if (prev <= ex0 + EPS) target = ex0;
+        else if (prev >= ex1 - EPS) target = ex1;
+        else target = (this.pos.x < (ex0 + ex1) / 2) ? ex0 : ex1;
+        this.pos.x = target;
         this.vel.x = 0;
       } else {
-        const pen = (this.pos.z < (ez0 + ez1) / 2) ? (ez0 - this.pos.z) : (ez1 - this.pos.z);
-        this.pos.z += pen;
+        let target;
+        if (prev <= ez0 + EPS) target = ez0;
+        else if (prev >= ez1 - EPS) target = ez1;
+        else target = (this.pos.z < (ez0 + ez1) / 2) ? ez0 : ez1;
+        this.pos.z = target;
         this.vel.z = 0;
       }
     }

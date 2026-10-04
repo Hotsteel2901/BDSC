@@ -11,6 +11,21 @@ const MINOR = [0, 2, 3, 5, 7, 8, 10];
 const DORIAN = [0, 2, 3, 5, 7, 9, 10];
 const PHRYGIAN = [0, 1, 3, 5, 7, 8, 10];
 
+/**
+ * Song arrangement helpers. Every track is a complete ~3-minute piece built
+ * from sections; the engine wraps back to the intro after the outro so endless
+ * gameplay still works. Layer multipliers are 0..1, `riser` fires a noise sweep
+ * on the section's last bar, `sub` enables the combat sub-pulse layer.
+ */
+const SEC = {
+  intro: (bars, o = {}) => ({ name: 'INTRO', bars, drums: 0.55, hats: 0, bass: 0.7, pad: 1, arp: 0, sub: false, energy: 0.72, ...o }),
+  build: (bars, o = {}) => ({ name: 'BUILD', bars, drums: 0.85, hats: 0.65, bass: 0.9, pad: 0.85, arp: 0, sub: false, energy: 0.92, riser: true, ...o }),
+  drop1: (bars, o = {}) => ({ name: 'DROP 1', bars, drums: 1, hats: 1, bass: 1, pad: 0.9, arp: 1, sub: false, energy: 1.12, ...o }),
+  break: (bars, o = {}) => ({ name: 'BREAKDOWN', bars, drums: 0, hats: 0.35, bass: 0.5, pad: 1.1, arp: 1, sub: false, energy: 0.85, riser: true, ...o }),
+  drop2: (bars, o = {}) => ({ name: 'DROP 2', bars, drums: 1, hats: 1, bass: 1.05, pad: 0.9, arp: 1, sub: true, energy: 1.25, ...o }),
+  outro: (bars, o = {}) => ({ name: 'OUTRO', bars, drums: 0.55, hats: 0.3, bass: 0.65, pad: 1, arp: 0.35, sub: false, energy: 0.75, ...o }),
+};
+
 export const TRACKS = [
   {
     id: 'neon',
@@ -27,6 +42,7 @@ export const TRACKS = [
     bass:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 4,0,0,0],
     arp:    [0,4,7,12],
     padMix: 0.5, reeseMix: 0.9, subMix: 1.0,
+    arrangement: [SEC.intro(8), SEC.build(16), SEC.drop1(32), SEC.break(20), SEC.drop2(32), SEC.outro(24)],
   },
   {
     id: 'substrate',
@@ -43,6 +59,7 @@ export const TRACKS = [
     bass:   [0,0,0,0, 0,0,0,0, 2,0,0,0, 0,0,3,0],
     arp:    [0,4,7,11],
     padMix: 0.75, reeseMix: 0.6, subMix: 1.0,
+    arrangement: [SEC.intro(12), SEC.build(16), SEC.drop1(28), SEC.break(24), SEC.drop2(28), SEC.outro(24)],
   },
   {
     id: 'overclock',
@@ -59,6 +76,7 @@ export const TRACKS = [
     bass:   [0,0,0,3, 0,0,0,0, 0,0,1,0, 0,0,0,0],
     arp:    [0,1,4,7],
     padMix: 0.25, reeseMix: 1.0, subMix: 0.9,
+    arrangement: [SEC.intro(8, { bass: 0.85 }), SEC.build(12), SEC.drop1(36), SEC.break(16), SEC.drop2(36), SEC.outro(24)],
   },
   {
     id: 'ghost',
@@ -75,6 +93,7 @@ export const TRACKS = [
     bass:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,4,0],
     arp:    [0,2,7,12],
     padMix: 1.0, reeseMix: 0.4, subMix: 0.85,
+    arrangement: [SEC.intro(16, { drums: 0, bass: 0.55, energy: 0.68 }), SEC.build(16), SEC.drop1(24), SEC.break(32), SEC.drop2(24), SEC.outro(20)],
   },
   {
     id: 'ironrain',
@@ -91,6 +110,7 @@ export const TRACKS = [
     bass:   [0,0,0,0, 0,0,0,5, 0,0,0,0, 3,0,0,0],
     arp:    [0,3,7,10],
     padMix: 0.35, reeseMix: 1.1, subMix: 1.1,
+    arrangement: [SEC.intro(8, { drums: 0.7 }), SEC.build(16), SEC.drop1(32), SEC.break(16, { hats: 0.5 }), SEC.drop2(36, { energy: 1.32 }), SEC.outro(24)],
   },
   {
     id: 'ascension',
@@ -107,6 +127,7 @@ export const TRACKS = [
     bass:   [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
     arp:    [0,4,7,12,16],
     padMix: 0.9, reeseMix: 0.5, subMix: 0.9,
+    arrangement: [SEC.intro(12, { arp: 0.5, energy: 0.78 }), SEC.build(16, { arp: 0.6 }), SEC.drop1(32), SEC.break(20, { arp: 1.1, pad: 1.15 }), SEC.drop2(32), SEC.outro(20)],
   },
 ];
 
@@ -179,54 +200,75 @@ export class DnBEngine {
     }
   }
 
+  /** Section covering an absolute bar of the song (wraps after the outro). */
+  sectionAt(bar) {
+    const arr = this.track.arrangement;
+    if (!arr || !arr.length) return { sec: { name: 'LOOP', bars: 1 }, idx: 0 };
+    let total = 0;
+    for (const s of arr) total += s.bars;
+    let b = ((bar % total) + total) % total;
+    for (const s of arr) {
+      if (b < s.bars) return { sec: s, idx: b, total };
+      b -= s.bars;
+    }
+    return { sec: arr[0], idx: 0, total };
+  }
+
   _playStep(step, t) {
     const tk = this.track;
-    const bar = Math.floor(step / 16);
+    const bar = Math.floor(step / 16);          // bar inside the 4-bar phrase
     const s16 = step % 16;
-    const I = this.intensity;
+    const absBar = this._bar * 4 + bar;         // bar in the full arrangement
+    const { sec, idx } = this.sectionAt(absBar);
+    const I = Math.min(1.6, (sec.energy ?? 1) * this.intensity);
+    const drumsV = sec.drums ?? 1;
+    const hatsV = sec.hats ?? 1;
+    const bassV = sec.bass ?? 1;
+    const padV = sec.pad ?? 1;
+    const arpV = sec.arp ?? 1;
 
     // drums
-    if (tk.kick[s16]) this._kick(t, s16 === 0 ? 1 : 0.9);
-    if (tk.snare[s16]) this._snare(t, 1.0);
-    if (tk.ghost[s16]) this._snare(t, 0.28, true);
-    if (tk.hat[s16]) this._hat(t, s16 % 2 === 0 ? 0.5 : 0.34);
-    if (tk.open[s16]) this._openHat(t);
-    if (tk.ride[s16]) this._ride(t);
-    if (tk.shaker[s16]) this._shaker(t);
+    if (tk.kick[s16] && drumsV > 0) this._kick(t, (s16 === 0 ? 1 : 0.9) * drumsV);
+    if (tk.snare[s16] && drumsV > 0) this._snare(t, drumsV);
+    if (tk.ghost[s16] && drumsV > 0) this._snare(t, 0.28 * drumsV, true);
+    if (tk.hat[s16] && hatsV > 0) this._hat(t, (s16 % 2 === 0 ? 0.5 : 0.34) * hatsV);
+    if (tk.open[s16] && hatsV > 0) this._openHat(t, hatsV);
+    if (tk.ride[s16] && hatsV > 0) this._ride(t, hatsV);
+    if (tk.shaker[s16] && hatsV > 0) this._shaker(t, hatsV);
 
     // fills at end of 4-bar phrase
-    if (step === 60 || step === 62) this._snare(t, 0.6, true);
+    if ((step === 60 || step === 62) && drumsV > 0.5) this._snare(t, 0.6 * drumsV, true);
 
     // bass — one note per bar from the bass pattern
     const bassDeg = tk.bass[s16];
-    if (bassDeg !== undefined && bassDeg !== 0 || (bassDeg === 0 && s16 === 0)) {
+    if (bassV > 0 && ((bassDeg !== undefined && bassDeg !== 0) || (bassDeg === 0 && s16 === 0))) {
       const chord = tk.progression[bar % tk.progression.length];
       const deg = chord[0] + bassDeg;
-      this._bass(t, this._degToFreq(deg - 12), tk, I);
+      this._bass(t, this._degToFreq(deg - 12), tk, I, bassV);
     }
 
-    // sub pulse on offbeats for energy
-    if (I > 1.05 && (s16 === 6 || s16 === 14)) {
+    // sub pulse / arps driven by the arrangement
+    if (sec.sub && (s16 === 6 || s16 === 14)) {
       const chord = tk.progression[bar % tk.progression.length];
       this._sub(t, this._degToFreq(chord[0] - 24), 0.9);
     }
 
     // pad — sustained chord at the start of each bar
-    if (step % 16 === 0) {
+    if (padV > 0 && step % 16 === 0) {
       const chord = tk.progression[bar % tk.progression.length];
-      this._chord(t, chord, tk, I);
+      this._chord(t, chord, tk, I, padV);
     }
 
     // arp
-    if (step % 2 === 0 && I > 0.8) {
+    if (arpV > 0 && step % 2 === 0) {
       const chord = tk.progression[bar % tk.progression.length];
-      const idx = Math.floor(step / 2) % tk.arp.length;
-      const deg = chord[0] + tk.arp[idx];
-      this._pluck(t, this._degToFreq(deg + 12), I);
+      const aidx = Math.floor(step / 2) % tk.arp.length;
+      const deg = chord[0] + tk.arp[aidx];
+      this._pluck(t, this._degToFreq(deg + 12), I, arpV);
     }
 
-    // riser / sweep at phrase boundaries
-    if (step === 48) this._startRiser(t, bar);
+    // riser / sweep on the last bar of a riser section
+    if (sec.riser && idx === sec.bars - 1 && s16 === 0) this._startRiser(t, absBar);
   }
 
   _degToFreq(deg) {
@@ -293,28 +335,28 @@ export class DnBEngine {
     const f = this.ctx.createBiquadFilter(); f.type='highpass'; f.frequency.value=7500;
     n.connect(f); f.connect(g); n.start(t); n.stop(t + 0.06);
   }
-  _openHat(t) {
-    const g = this._out(t, 0.18, 0.2);
+  _openHat(t, v = 1) {
+    const g = this._out(t, 0.18 * v, 0.2);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.2, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.2 * v, t + 0.002);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
     const n = this.ctx.createBufferSource(); n.buffer = this._noise; n.playbackRate.value = 1.4;
     const f = this.ctx.createBiquadFilter(); f.type='highpass'; f.frequency.value=6500;
     n.connect(f); f.connect(g); n.start(t); n.stop(t + 0.35);
   }
-  _ride(t) {
-    const g = this._out(t, 0.12, -0.2);
+  _ride(t, v = 1) {
+    const g = this._out(t, 0.12 * v, -0.2);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.14, t + 0.002);
+    g.gain.exponentialRampToValueAtTime(0.14 * v, t + 0.002);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.5);
     const n = this.ctx.createBufferSource(); n.buffer = this._noise; n.playbackRate.value = 1.2;
     const f = this.ctx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=9000; f.Q.value=1.5;
     n.connect(f); f.connect(g); n.start(t); n.stop(t + 0.5);
   }
-  _shaker(t) {
-    const g = this._out(t, 0.09, (Math.random()-0.5)*0.5);
+  _shaker(t, v = 1) {
+    const g = this._out(t, 0.09 * v, (Math.random()-0.5)*0.5);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.1, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.1 * v, t + 0.006);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.06);
     const n = this.ctx.createBufferSource(); n.buffer = this._noise; n.playbackRate.value = 1.9;
     const f = this.ctx.createBiquadFilter(); f.type='highpass'; f.frequency.value=5500;
@@ -331,11 +373,11 @@ export class DnBEngine {
     o.connect(g); o.start(t); o.stop(t + 0.34);
   }
 
-  _bass(t, freq, tk, I) {
+  _bass(t, freq, tk, I, v = 1) {
     // sub layer
-    this._sub(t, freq, tk.subMix * 0.9);
+    this._sub(t, freq, tk.subMix * 0.9 * v);
     // reese layer: two detuned saws, lowpassed, short
-    const g = this._out(t, 0.5 * tk.reeseMix * Math.min(1.4, I), 0);
+    const g = this._out(t, 0.5 * tk.reeseMix * Math.min(1.4, I) * v, 0);
     g.gain.setValueAtTime(0.0001, t);
     g.gain.linearRampToValueAtTime(0.5, t + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
@@ -349,12 +391,12 @@ export class DnBEngine {
     o1.stop(t+0.34);o2.stop(t+0.34);o3.stop(t+0.34);
   }
 
-  _chord(t, degrees, tk, I) {
+  _chord(t, degrees, tk, I, v = 1) {
     const dur = this.stepDuration * 16 * 1.05;
-    const g = this._out(t, 0.09 * tk.padMix * Math.min(1.3, I), 0);
+    const g = this._out(t, 0.09 * tk.padMix * Math.min(1.3, I) * v, 0);
     g.gain.setValueAtTime(0.0001, t);
-    g.gain.linearRampToValueAtTime(0.1 * tk.padMix, t + 0.5);
-    g.gain.setValueAtTime(0.1 * tk.padMix, t + dur - 0.7);
+    g.gain.linearRampToValueAtTime(0.1 * tk.padMix * v, t + 0.5);
+    g.gain.setValueAtTime(0.1 * tk.padMix * v, t + dur - 0.7);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     const lp = this.ctx.createBiquadFilter(); lp.type='lowpass'; lp.frequency.value = 2200; lp.Q.value = 1.2;
     lp.connect(g);
@@ -371,8 +413,8 @@ export class DnBEngine {
     });
   }
 
-  _pluck(t, freq, I) {
-    const g = this._out(t, 0.08 * Math.min(1.2, I));
+  _pluck(t, freq, I, v = 1) {
+    const g = this._out(t, 0.08 * Math.min(1.2, I) * v);
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(0.1, t + 0.004);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.22);

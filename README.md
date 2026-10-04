@@ -37,6 +37,7 @@ npm run relay        # optional self-hosted MQTT relay (LAN / offline)
 npm test             # headless Playwright smoke test (dev server must be running)
 npm run test:net     # two-client multiplayer sync test
 npm run test:mobile  # touch controls / mobile layout acceptance
+npm run test:collision # collision regression (no wall/corner teleports)
 ```
 
 > The smoke tests use Playwright/Chromium. If it isn't installed: `npx playwright install chromium`.
@@ -135,10 +136,14 @@ particles, and multiplayer snapshot sync were all made green.
    working staircase + stairwell opening are added. Everything above stays a solid,
    structurally-consistent mass so the tower silhouette never changes.
 
-**10 — Music & SFX.** Six procedural Drum & Bass tracks (all synthesised live:
-amen-style breaks, sub + reese bass, filtered pads, arps, risers) and dozens of
-synthesised SFX (per-weapon reports, impacts by surface, footsteps, reloads, explosions,
-grenades, enemy barks, alarms, pickups, ambience). No audio files.
+**10 — Music & SFX.** Six complete procedural Drum & Bass songs, all synthesised live
+(amen-style breaks, sub + reese bass, filtered pads, arps, risers). Every track is a
+full ~3-minute multi-section arrangement — intro → build → drop → breakdown → drop 2 →
+outro — with arrangement-driven layering (drums/hats/bass/pad/arp/sub pulses) and noise
+risers on the transitions; the arrangement wraps seamlessly so the soundtrack keeps
+evolving during play. Dozens of synthesised SFX (per-weapon reports, impacts by surface,
+footsteps, reloads, explosions, grenades, enemy barks, alarms, pickups, ambience).
+No audio files.
 
 ---
 
