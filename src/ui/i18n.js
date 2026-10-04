@@ -172,6 +172,18 @@ const EN = {
   'wep.alreadyFitted': 'ALREADY FITTED',
   'wep.slotFitted': '{slot} FITTED',
 
+  'touch.fire': 'FIRE',
+  'touch.jump': 'JUMP',
+  'touch.reload': 'RELOAD',
+  'touch.ads': 'ADS',
+  'touch.crouch': 'CROUCH',
+  'touch.grenade': 'NADE',
+  'touch.heal': 'HEAL',
+  'touch.inv': 'BAG',
+  'touch.pause': 'PAUSE',
+  'touch.rotate': 'ROTATE DEVICE',
+  'touch.hint': 'Left stick to move (push to the edge to sprint) · drag the right side to look · tap the buttons to act',
+
   // ---- categories / names used in UI ----
   'cat.ammo': 'AMMO',
   'cat.medical': 'MEDICAL',
@@ -355,6 +367,18 @@ const ZH = {
 
   'wep.alreadyFitted': '已装配',
   'wep.slotFitted': '{slot} 已装配',
+
+  'touch.fire': '开火',
+  'touch.jump': '跳跃',
+  'touch.reload': '换弹',
+  'touch.ads': '瞄准',
+  'touch.crouch': '下蹲',
+  'touch.grenade': '手雷',
+  'touch.heal': '治疗',
+  'touch.inv': '背包',
+  'touch.pause': '暂停',
+  'touch.rotate': '请横屏使用',
+  'touch.hint': '左摇杆移动（推到底自动疾跑）· 右侧滑动视角 · 点按按钮操作',
 
   'cat.ammo': '弹药',
   'cat.medical': '医疗',

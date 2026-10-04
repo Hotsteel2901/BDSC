@@ -121,10 +121,20 @@ export class Player {
     if (input.down('KeyS')) iz -= 1;
     if (input.down('KeyD')) ix += 1;
     if (input.down('KeyA')) ix -= 1;
+    // analogue touch stick overrides the digital keys when deflected
+    let mag = Math.min(1, Math.hypot(ix, iz));
+    if (input.moveAxis) {
+      const ax = input.moveAxis();
+      if (ax && (ax.x * ax.x + ax.y * ax.y) > 0.0001) {
+        ix = ax.x; iz = ax.y;
+        mag = Math.min(1, Math.hypot(ix, iz));
+      }
+    }
     this.moveInput.set(ix, iz);
 
     this.crouching = input.down('ControlLeft') || input.down('KeyC');
-    const wantSprint = (input.down('ShiftLeft')) && iz > 0 && !this.crouching;
+    // touch: pushing the stick to the edge auto-sprints (no shift key needed)
+    const wantSprint = (input.down('ShiftLeft') || (input.touch && mag > 0.85)) && iz > 0.15 && !this.crouching;
     this.sprinting = wantSprint;
 
     const targetHeight = this.crouching ? this.crouchHeight : this.standHeight;
@@ -137,7 +147,7 @@ export class Player {
     const wish = new THREE.Vector3();
     wish.addScaledVector(forward, iz);
     wish.addScaledVector(right, ix);
-    if (wish.lengthSq() > 0) wish.normalize().multiplyScalar(maxSpeed);
+    if (wish.lengthSq() > 0) wish.normalize().multiplyScalar(maxSpeed * mag);
 
     // --- horizontal accel ---
     const a = this.onGround ? this.accel : this.airAccel;

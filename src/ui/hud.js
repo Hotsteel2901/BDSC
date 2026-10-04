@@ -166,7 +166,7 @@ export class HUD {
           </label>
         </div>
         <div class="hint" id="menu-status" style="margin-top:10px" data-i18n="menu.ready">${t('menu.ready')}</div>
-        <div class="hint" style="margin-top:8px" data-i18n="menu.controls">${t('menu.controls')}</div>
+        <div class="hint" style="margin-top:8px" id="menu-controls" data-i18n="menu.controls">${t('menu.controls')}</div>
         <div class="hint" style="margin-top:6px;opacity:.5" data-i18n-html="menu.relayHint">${t('menu.relayHint')}</div>
       </div>
     `;
@@ -291,7 +291,7 @@ export class HUD {
     for (let i = 0; i < 7; i++) {
       const id = game.inventory.hotbar[i];
       const def = id ? ITEMS_BY_ID[id] : null;
-      qb += `<div class="qslot">` +
+      qb += `<div class="qslot" data-qi="${i}">` +
         `<span class="k">${keys[i]}</span>` +
         (def ? `<span class="ico" style="color:${hex(def.rarityColor)}">${def.icon || '?'}</span><span class="n">${game.inventory.countOf(id)}</span>` : '') +
         `</div>`;

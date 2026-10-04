@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { AsciiComposer, DEFAULT_RAMP, SYMBOL_RAMP } from './engine/ascii.js';
-import { Input } from './engine/input.js';
+import { Input, isTouchDevice } from './engine/input.js';
 import { AudioEngine } from './engine/audio.js';
 import { DnBEngine } from './music/dnb.js';
 import { World } from './game/world.js';
@@ -13,6 +13,7 @@ import { WeaponSystem } from './game/weapons.js';
 import { Player } from './game/player.js';
 import { Net } from './game/net.js';
 import { HUD } from './ui/hud.js';
+import { TouchControls } from './ui/touch.js';
 import { SpawnDirector } from './game/spawner.js';
 import { Buffs } from './game/buffs.js';
 import { Inventory } from './game/items/inventory.js';
@@ -51,7 +52,7 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.05, 4000);
     this.scene.add(this.camera);
 
-    this.composer = new AsciiComposer(this.renderer, { charSize: 11, ramp: DEFAULT_RAMP });
+    this.composer = new AsciiComposer(this.renderer, { charSize: isTouchDevice() ? 13 : 11, ramp: DEFAULT_RAMP });
     this.composer.setSize(window.innerWidth, window.innerHeight);
     this.input = new Input(this.canvas);
     this.audio = new AudioEngine();
@@ -92,6 +93,8 @@ class Game {
     this.world.onChunkUnload = (cx, cz) => this.loot.offChunk(cx, cz);
 
     this.hud = new HUD(document.getElementById('ui'));
+    // desktop gets a no-op stand-in so the main loop can call it unconditionally
+    this.touch = this.input.touch ? new TouchControls(this) : { setVisible() {}, update() {} };
 
     this.enemies.onKill = (enemy, head) => {
       this.kills++;
@@ -161,6 +164,7 @@ class Game {
       if (this.state === 'playing' && !this.menuOpen) this.setPaused(true);
     });
     this.canvas.addEventListener('mousedown', () => {
+      if (this.input.touch) return;
       if (this.state === 'playing' && !this.input.locked) this.input.requestLock();
     });
   }
@@ -192,6 +196,7 @@ class Game {
       }
     };
     if (localStorage.getItem('bdsc_ascii') === '0') $('in-ascii').checked = false;
+    if (this.input.touch && localStorage.getItem('bdsc_ascii') !== '0') $('in-char').value = '13';
     this.composer.enabled = $('in-ascii').checked;
     syncAsciiControls();
 
@@ -358,6 +363,7 @@ class Game {
     this.player.reset(spawn, Math.PI * 0.25);
     this.objectiveText = t('obj.inbound');
     this.hud.toast(opts.solo ? t('msg.solo') : (this._isHost ? t('msg.hosting') : t('msg.joined')));
+    if (this.input.touch) this.hud.toast(t('touch.hint'));
   }
 
   setPaused(on) {
@@ -600,6 +606,8 @@ class Game {
     this.composer.setHit(Math.min(1, this._hitPulse || 0));
     this._hitPulse = Math.max(0, (this._hitPulse || 0) - dt * 3);
     this.composer.render(this.scene, this.camera, now * 0.001);
+    this.touch.setVisible(this.state === 'playing' && !this.menuOpen && !this.hud.inventoryOpen && !this.hud.arsenalOpen);
+    this.touch.update(this);
     this.hud.update(this);
     this.input.endFrame();
   }

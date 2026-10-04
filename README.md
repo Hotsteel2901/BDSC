@@ -36,6 +36,7 @@ npm run preview      # serve the production build
 npm run relay        # optional self-hosted MQTT relay (LAN / offline)
 npm test             # headless Playwright smoke test (dev server must be running)
 npm run test:net     # two-client multiplayer sync test
+npm run test:mobile  # touch controls / mobile layout acceptance
 ```
 
 > The smoke tests use Playwright/Chromium. If it isn't installed: `npx playwright install chromium`.
@@ -62,6 +63,24 @@ npm run test:net     # two-client multiplayer sync test
 
 Weapons: VECTOR-9 pistol, WASP SMG, PULSE AR, BREACH-12 shotgun, LANCE DMR sniper,
 ION CASTER plasma, HOUND RL rocket launcher.
+
+### Mobile / touch
+
+Phones and tablets automatically get a full touch layout (force it on desktop with
+`?touch=1`, disable with `?touch=0`):
+
+- **Left dynamic joystick** — move; analogue speed, push to the edge to auto-sprint.
+- **Right side drag** — look; a dynamic stick appears where you touch.
+- **Weapon strip** (top centre) — tap 1–7 to switch weapons.
+- **Quickbar** (bottom centre) — tap a slot to use that item (Z X C V B N M).
+- **Right thumb cluster** — FIRE, JUMP, RELOAD, ADS (toggle), CROUCH (toggle),
+  GRENADE and HEAL; **PAUSE** and **BAG** sit top-right.
+- Portrait orientation shows a rotate-device hint; menus and overlays reflow and
+  scroll for small screens.
+
+The whole touch layer routes through the same virtual input API as the keyboard,
+so every system (weapons, grenades, hotbar, inventory, arsenal, multiplayer) works
+unchanged.
 
 ---
 
@@ -200,6 +219,7 @@ src/
     localize.js          in-place registry translations (items, tree, ...)
     lang/zh-content.js   Simplified Chinese content dictionary
     fonts/               subset Fusion Pixel CJK font + OFL license
+    touch.js             mobile joysticks + touch action buttons
     style.css
 server/
   relay.js                optional self-hosted Aedes MQTT-over-WS relay

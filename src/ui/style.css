@@ -168,4 +168,133 @@ label.field { display:flex; flex-direction:column; gap:4px; font-size:11px; opac
 .recbtn:hover { background:var(--accent); color:#04140c; }
 .rec.no .recbtn { border-color:var(--dim); cursor:not-allowed; }
 
+/* ============================ TOUCH / MOBILE ============================ */
+body { -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+body { -webkit-user-select: none; user-select: none; }
+input, select, textarea { -webkit-user-select: auto; user-select: auto; }
+#gl { touch-action: none; }
+
+#touch { position:absolute; inset:0; display:none; pointer-events:none; z-index:15; -webkit-touch-callout:none; }
+#touch.on { display:block; }
+
+/* dynamic joystick zones (left = move, right = look) */
+#touch .tzone { position:absolute; top:0; bottom:0; width:50%; pointer-events:auto; touch-action:none; z-index:1; }
+#tzone-move { left:0; }
+#tzone-look { right:0; }
+#touch .tstick { position:absolute; width:0; height:0; opacity:0; transition:opacity .08s; }
+#touch .tstick.active { opacity:1; }
+#touch .tstick::before {
+  content:''; position:absolute; left:-64px; top:-64px; width:128px; height:128px; border-radius:50%;
+  border:2px solid rgba(55,255,139,.32);
+  background:radial-gradient(circle, rgba(55,255,139,.09), rgba(55,255,139,0) 70%);
+}
+#touch .tstick .tknob {
+  position:absolute; left:-23px; top:-23px; width:46px; height:46px; border-radius:50%;
+  border:2px solid var(--accent); background:rgba(10,30,20,.55); box-shadow:0 0 12px rgba(55,255,139,.35);
+}
+#touch .tstick.look::before { border-color:rgba(77,224,255,.3); background:radial-gradient(circle, rgba(77,224,255,.08), rgba(77,224,255,0) 70%); }
+#touch .tstick.look .tknob { border-color:#4de0ff; box-shadow:0 0 12px rgba(77,224,255,.35); }
+#touch .tstick.sprint::before { border-color:rgba(255,204,77,.75); }
+
+/* weapon strip (tap 1-7) */
+#touch-weapons {
+  position:absolute; top:calc(6px + env(safe-area-inset-top)); left:50%; transform:translateX(-50%);
+  display:flex; gap:4px; pointer-events:auto; z-index:2;
+}
+#touch .tweap {
+  width:46px; height:30px; border:1px solid var(--dim); background:rgba(4,12,8,.7); color:var(--fg);
+  display:flex; flex-direction:column; align-items:center; justify-content:center; line-height:1.05;
+  font-size:9px; touch-action:none;
+}
+#touch .tweap b { font-size:11px; color:var(--accent); }
+#touch .tweap.sel { border-color:var(--accent); background:rgba(55,255,139,.16); }
+
+/* top-right utility buttons */
+#touch-top { position:absolute; top:calc(6px + env(safe-area-inset-top)); right:calc(8px + env(safe-area-inset-right)); display:flex; gap:6px; pointer-events:auto; z-index:3; }
+
+/* right-thumb action cluster */
+#touch-actions {
+  position:absolute; right:calc(8px + env(safe-area-inset-right)); bottom:calc(8px + env(safe-area-inset-bottom));
+  width:232px; height:236px; pointer-events:none; z-index:2;
+}
+#touch .tbtn {
+  position:absolute; pointer-events:auto; touch-action:none;
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  width:54px; height:54px; border-radius:50%; border:2px solid rgba(55,255,139,.55);
+  background:rgba(4,14,9,.55); color:var(--fg); font-size:15px;
+}
+#touch .tbtn span { font-size:8px; letter-spacing:.5px; opacity:.8; margin-top:1px; }
+#touch .tbtn.on { background:rgba(55,255,139,.3); border-color:var(--accent); }
+#touch .tbtn.square { position:relative; width:46px; height:40px; border-radius:9px; font-size:12px; }
+#touch .tbtn.small { width:50px; height:50px; font-size:13px; }
+#touch .tbtn.fire { width:86px; height:86px; right:0; bottom:0; font-size:26px; border-color:var(--accent2); box-shadow:0 0 18px rgba(255,77,109,.25); }
+#touch .tbtn.fire.on { background:rgba(255,77,109,.32); border-color:var(--accent2); }
+#touch .tbtn.jump { right:98px; bottom:4px; width:62px; height:62px; }
+#touch .tbtn.ads { right:8px; bottom:96px; width:58px; height:58px; }
+#touch .tbtn.reload { right:78px; bottom:96px; }
+#touch .tbtn.crouch { right:0; bottom:164px; width:50px; height:50px; }
+#touch .tbtn.grenade { right:58px; bottom:174px; width:50px; height:50px; }
+#touch .tbtn.heal { right:116px; bottom:184px; width:50px; height:50px; }
+
+/* portrait: ask for landscape */
+#touch-rotate {
+  display:none; position:absolute; inset:0; align-items:center; justify-content:center;
+  background:rgba(2,6,4,.92); pointer-events:auto;
+}
+#touch-rotate .panel { text-align:center; letter-spacing:2px; }
+#touch-rotate .rot-ico { font-size:36px; color:var(--accent); margin-bottom:10px; }
+@media (orientation: portrait) {
+  body.touch #touch.on #touch-rotate { display:flex; }
+  body.touch #touch.on .tzone,
+  body.touch #touch.on #touch-actions,
+  body.touch #touch.on #touch-top,
+  body.touch #touch.on #touch-weapons { display:none; }
+}
+
+/* HUD reflow while playing on touch */
+body.touch-play #hud-bc { display:none; }
+body.touch-play .hud-tr { top:48px; }
+body.touch-play #objective { top:132px; }
+body.touch-play #minimap { width:112px; height:112px; left:8px; bottom:8px; right:auto; }
+body.touch-play .hud-bl { left:8px; bottom:126px; font-size:10px; }
+body.touch-play #netstat { bottom:132px; }
+body.touch-play #hud-br { right:auto; left:50%; transform:translateX(-50%); bottom:58px; text-align:center; }
+body.touch-play #quickbar { bottom:8px; }
+body.touch-play #quickbar .qslot { width:44px; height:44px; pointer-events:auto; font-size:16px; }
+body.touch-play #quickbar .qslot .k { font-size:10px; }
+body.touch-play #toast { top:13%; }
+@media (max-width: 760px) {
+  body.touch-play #quickbar { left: calc(50% - 18px); }
+  body.touch-play #quickbar .qslot { width:38px; height:38px; font-size:13px; }
+}
+
+/* menu + overlays on narrow / touch screens */
+#menu { padding:10px; overflow-y:auto; }
+@media (pointer: coarse), (max-width: 760px) {
+  #menu .box { width:min(720px, 96vw); }
+  #menu .ascii-logo { font-size:5px; line-height:1.08; overflow:hidden; }
+  label.field { min-width:40%; }
+  button, .btn { padding:11px 14px; }
+  .overlay .win { width:96vw; max-height:94vh; }
+  .inv-grid { grid-template-columns:repeat(5, minmax(0, 1fr)); }
+  .slot { min-height:56px; }
+  .tree { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  .tabs .tab { padding:7px 14px; }
+  .att, .recbtn, .upg, .node { min-height:34px; }
+}
+@media (max-width: 480px) {
+  #menu .ascii-logo { font-size:3.4px; }
+  label.field { min-width:100%; }
+}
+@media (max-height: 360px) {
+  #touch .tbtn.fire { width:72px; height:72px; }
+  #touch .tbtn.jump { width:54px; height:54px; right:80px; }
+  #touch .tbtn.ads { bottom:82px; }
+  #touch .tbtn.reload { right:70px; bottom:82px; }
+  #touch .tbtn.crouch { bottom:146px; }
+  #touch .tbtn.grenade { bottom:152px; }
+  #touch .tbtn.heal { bottom:160px; }
+  #touch-actions { height:212px; }
+}
+
 

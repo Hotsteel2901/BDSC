@@ -11,7 +11,8 @@
     "relay": "node server/relay.js",
     "test": "node test/smoke.mjs",
     "test:net": "node test/net.mjs",
-    "test:systems": "node test/systems.mjs"
+    "test:systems": "node test/systems.mjs",
+    "test:mobile": "node test/mobile.mjs"
   },
   "dependencies": {
     "aedes": "^1.2.0",
