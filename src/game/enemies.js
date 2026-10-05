@@ -954,13 +954,15 @@ export class Enemy {
     this.vel.z += (desired.z - this.vel.z) * Math.min(1, dt * a * 0.4);
     this.type.moving = Math.hypot(this.vel.x, this.vel.z) > 0.5;
 
-    // integrate with collision (axis-separated)
+    // integrate with collision (axis-separated). Flyers collide too, so they
+    // can no longer drift through a building shell and shoot out of the walls
+    // (a unit whose ray starts inside a solid box passes the slab test).
     if (!T.stationary) {
       const nx = this.pos.x + this.vel.x * dt;
-      if (!ctx.world.pointBlocked(nx, this.pos.y + 0.9, this.pos.z, this.type.radius * 0.8) || T.flying) this.pos.x = nx;
+      if (!ctx.world.pointBlocked(nx, this.pos.y + 0.9, this.pos.z, this.type.radius * 0.8)) this.pos.x = nx;
       else this.vel.x = 0;
       const nz = this.pos.z + this.vel.z * dt;
-      if (!ctx.world.pointBlocked(this.pos.x, this.pos.y + 0.9, nz, this.type.radius * 0.8) || T.flying) this.pos.z = nz;
+      if (!ctx.world.pointBlocked(this.pos.x, this.pos.y + 0.9, nz, this.type.radius * 0.8)) this.pos.z = nz;
       else this.vel.z = 0;
     } else {
       this.vel.set(0, 0, 0);
@@ -1107,6 +1109,20 @@ export class EnemyManager {
   spawn(typeName, pos, squad = null, opts = {}) {
     const type = ENEMY_TYPES[typeName];
     if (!type) return null;
+
+    // Never spawn embedded in solid geometry. A unit inside a building mass is
+    // untouchable: the player's hitscan hits the shell first, while the unit's
+    // own shot ray starts *inside* the AABB (where the slab test reports no hit)
+    // so it fires straight out through the wall.
+    if (!opts.ghost) {
+      const r = (type.radius || 0.5) * 0.7;
+      if (this.world.pointBlocked(pos.x, pos.y + 0.9, pos.z, r)) {
+        const clear = this.world.clearStreetSpawn(pos.x, pos.z, r);
+        if (!clear) return null;
+        pos = clear;
+      }
+    }
+
     if (!squad) {
       squad = this.squads.find(s => s.members.length < 5) || this._newSquad();
     }
@@ -1180,6 +1196,26 @@ export class EnemyManager {
         e._animate(dt, ctx);
       } else {
         e.update(dt, ctx);
+        // Safety net: if a unit somehow ends up embedded in a solid building
+        // mass (spawn nudge, a drone drifting through a wall, a chunk edge),
+        // move it back onto the street rather than leaving an untouchable
+        // shooter firing out of the walls.
+        if (e.alive) {
+          e._embedCheck = (e._embedCheck ?? 0) - dt;
+          if (e._embedCheck <= 0) {
+            e._embedCheck = 0.6 + Math.random() * 0.6;
+            if (this.world.pointBlocked(e.pos.x, e.pos.y + 0.9, e.pos.z, 0.15, 'building')) {
+              const clear = this.world.clearStreetSpawn(e.pos.x, e.pos.z, 0.6);
+              if (clear) {
+                e.pos.set(clear.x, clear.y, clear.z);
+                e.vel.set(0, 0, 0);
+                e.root.position.copy(e.pos);
+              } else {
+                e.removeMe = true;
+              }
+            }
+          }
+        }
       }
       if (e.removeMe) {
         this.group.remove(e.root);

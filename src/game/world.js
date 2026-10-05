@@ -604,32 +604,42 @@ export class World {
   }
 
   /** Is a point inside a solid collider's footprint at the given y? */
-  pointBlocked(x, y, z, pad = 0) {
+  pointBlocked(x, y, z, pad = 0, tag = null) {
     const list = this.colliderHash.query(
       new THREE.Vector3(x - 0.1, y - 0.1, z - 0.1),
       new THREE.Vector3(x + 0.1, y + 0.1, z + 0.1),
       this._buf, this._seen
     );
     for (const b of list) {
+      if (tag && b.tag !== tag) continue;
       if (x >= b.min.x - pad && x <= b.max.x + pad && z >= b.min.z - pad && z <= b.max.z + pad && y >= b.min.y - pad && y <= b.max.y + pad) return b;
     }
     return null;
   }
 
+  /**
+   * Offset of (x,z) from the centre of the BLOCK cell it sits in. Block
+   * centres are `blockIndex * BLOCK + BLOCK/2` (see `_buildBlock`), NOT
+   * multiples of BLOCK — getting this wrong inverts the whole street/pad map
+   * and makes building interiors look like roads.
+   */
+  blockOffset(x, z) {
+    return [
+      x - (Math.floor(x / BLOCK) + 0.5) * BLOCK,
+      z - (Math.floor(z / BLOCK) + 0.5) * BLOCK,
+    ];
+  }
+
   isWalkable(x, z) {
-    const bcx = Math.round(x / BLOCK) * BLOCK;
-    const bcz = Math.round(z / BLOCK) * BLOCK;
-    const dx = x - bcx, dz = z - bcz;
+    const [dx, dz] = this.blockOffset(x, z);
     const half = PAD / 2 - 0.5;
-    if (Math.abs(dx) < half && Math.abs(dz) < half) return false; // inside building pad
+    if (Math.abs(dx) < half && Math.abs(dz) < half) return false; // on a building/sidewalk pad
     return true;
   }
 
   groundHeight(x, z) {
     // sidewalk pads are raised; approximate
-    const bcx = Math.round(x / BLOCK) * BLOCK;
-    const bcz = Math.round(z / BLOCK) * BLOCK;
-    const dx = x - bcx, dz = z - bcz;
+    const [dx, dz] = this.blockOffset(x, z);
     const half = PAD / 2;
     if (Math.abs(dx) < half && Math.abs(dz) < half) return 0.18;
     return 0;
@@ -660,6 +670,20 @@ export class World {
     const x = cx + Math.cos(ang) * r;
     const z = cz + Math.sin(ang) * r;
     return this.findStreetSpawn(x, z);
+  }
+
+  /**
+   * A street position near (x,z) that is guaranteed not to be embedded in
+   * solid geometry. Returns null if no clear spot is found.
+   */
+  clearStreetSpawn(x, z, radius = 0.6) {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      const jx = attempt === 0 ? x : x + (Math.random() - 0.5) * 20;
+      const jz = attempt === 0 ? z : z + (Math.random() - 0.5) * 20;
+      const s = this.findStreetSpawn(jx, jz);
+      if (!this.pointBlocked(s.x, s.y + 0.9, s.z, radius)) return s;
+    }
+    return null;
   }
 
   hasChunkAt(x, z) {

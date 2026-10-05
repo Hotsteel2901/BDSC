@@ -17,28 +17,46 @@ export const DEFAULT_RAMP =
 export const SYMBOL_RAMP =
   ' .-:~=+*ox%#@';
 
+/**
+ * Structural line glyphs appended to every ramp. They are selected by gradient
+ * *orientation* on edges (instead of a dense texture glyph), which is what
+ * makes architecture and enemy silhouettes read as clean line art rather than
+ * dissolving into noise. Order matters: index 0..3 = |  -  /  \.
+ */
+export const EDGE_GLYPHS = '|-/\\';
+
+/** Append the structural edge glyphs to a density ramp. */
+export function fullRamp(densityRamp) {
+  return densityRamp + EDGE_GLYPHS;
+}
+
 export class AsciiComposer {
   constructor(renderer, opts = {}) {
     this.renderer = renderer;
-    this.charSize = opts.charSize || 11;     // cell size in screen px
+    this.charSize = opts.charSize || 12;     // cell size in screen px
     this.resMult = opts.resMult || 4;        // internal pixels per cell (AA for small bright features)
     this.color = opts.color !== false;       // tint glyphs with scene colour
     this.edge = opts.edge !== false;         // sobel edge -> outline glyphs
-    this.contrast = opts.contrast ?? 1.15;
-    this.brightness = opts.brightness ?? 2.05;
-    this.saturation = opts.saturation ?? 1.18;
+    this.contrast = opts.contrast ?? 1.18;
+    this.brightness = opts.brightness ?? 1.95;
+    this.saturation = opts.saturation ?? 1.15;
     this.gamma = opts.gamma ?? 0.4545; // linear -> sRGB (1/2.2)
-    this.ramp = opts.ramp || DEFAULT_RAMP;
+    this.densityRamp = opts.ramp || DEFAULT_RAMP;
+    this.ramp = fullRamp(this.densityRamp);   // density glyphs + structural edges
+    this.densityLen = this.densityRamp.length;
+    this.edgeBase = this.densityLen;
     this.fg = new THREE.Color(opts.fg || 0x9dffbf);
     this.bg = new THREE.Color(opts.bg || 0x03060a);
     this.enabled = opts.enabled !== false;
     this.fx = {
-      scanline: opts.scanline ?? 0.10,
-      vignette: opts.vignette ?? 0.26,
-      bloom: opts.bloom ?? 0.34,
-      aberration: opts.aberration ?? 0.9,
-      noise: opts.noise ?? 0.045,
-      flicker: opts.flicker ?? 0.015,
+      // Calmer post FX: heavy scanlines / grain / aberration all ate into
+      // glyph legibility, so they default low and can still be tuned.
+      scanline: opts.scanline ?? 0.05,
+      vignette: opts.vignette ?? 0.18,
+      bloom: opts.bloom ?? 0.32,
+      aberration: opts.aberration ?? 0.45,
+      noise: opts.noise ?? 0.022,
+      flicker: opts.flicker ?? 0.008,
     };
 
     this.fontTexture = makeFontAtlas(this.ramp, 32);
@@ -73,6 +91,8 @@ export class AsciiComposer {
         uFontCols: { value: this.fontCols },
         uFontRows: { value: this.fontRows },
         uRampLen: { value: this.ramp.length },
+        uDensityLen: { value: this.densityLen },
+        uEdgeBase: { value: this.edgeBase },
         uColor: { value: this.color ? 1 : 0 },
         uEdge: { value: this.edge ? 1 : 0 },
         uContrast: { value: this.contrast },
@@ -108,6 +128,8 @@ export class AsciiComposer {
         uniform float uFontCols;
         uniform float uFontRows;
         uniform float uRampLen;
+        uniform float uDensityLen;
+        uniform float uEdgeBase;
         uniform float uColor;
         uniform float uEdge;
         uniform float uContrast;
@@ -156,60 +178,70 @@ export class AsciiComposer {
           // sample the scene at the centre of the cell
           vec2 sampleUv = (cellIdx * cell + cell * 0.5) / uResolution;
 
-          // chromatic aberration
+          // chromatic aberration (centre tap only)
           vec2 ca = (cellUv - 0.5) * (uAberration / uResolution) * 2.0;
           vec3 col;
           col.r = texture2D(tScene, sampleUv + ca).r;
           col.g = texture2D(tScene, sampleUv).g;
           col.b = texture2D(tScene, sampleUv - ca).b;
 
-          // edge detection across neighbouring cells (luminance sobel)
-          float edgeAmt = 0.0;
-          if (uEdge > 0.5) {
-            vec2 t = vec2(cell) / uResolution;
-            float l = luma(texture2D(tScene, sampleUv - vec2(t.x, 0.0)).rgb);
-            float r = luma(texture2D(tScene, sampleUv + vec2(t.x, 0.0)).rgb);
-            float u = luma(texture2D(tScene, sampleUv - vec2(0.0, t.y)).rgb);
-            float d = luma(texture2D(tScene, sampleUv + vec2(0.0, t.y)).rgb);
-            edgeAmt = clamp(length(vec2(r - l, d - u)) * 2.4, 0.0, 1.0);
-          }
+          // --- stable fill ---
+          // Average a small cross of taps so a flat surface settles on a single
+          // glyph instead of shimmering between neighbouring density levels.
+          vec2 off = vec2(cell * 0.34) / uResolution;
+          vec3 sR = texture2D(tScene, sampleUv + vec2(off.x, 0.0)).rgb;
+          vec3 sL = texture2D(tScene, sampleUv - vec2(off.x, 0.0)).rgb;
+          vec3 sD = texture2D(tScene, sampleUv + vec2(0.0, off.y)).rgb;
+          vec3 sU = texture2D(tScene, sampleUv - vec2(0.0, off.y)).rgb;
+          vec3 fillRaw = (col * 2.0 + sR + sL + sD + sU) / 6.0;
 
-          // grade — and let the brightest texel within the cell footprint win,
-          // so thin/small bright features (enemy markers, tracers, flashes) are
-          // not lost to a single unlucky centre sample.
-          // Pick the brightest raw texel in the cell footprint, then grade only
-          // the centre and that winner (cheap) so small bright features survive
-          // without flattening the moody base art.
+          // brightest texel (keeps tiny bright features: markers / tracers / flashes)
           vec3 rawPeak = col; float rawL = luma(col); float peakFound = 0.0;
-          {
-            vec2 off = vec2(cell * 0.42) / uResolution;
-            vec3 s;
-            s = texture2D(tScene, sampleUv + vec2(off.x, 0.0)).rgb; float sl = luma(s); if (sl > rawL) { rawL = sl; rawPeak = s; peakFound = 1.0; }
-            s = texture2D(tScene, sampleUv - vec2(off.x, 0.0)).rgb; sl = luma(s); if (sl > rawL) { rawL = sl; rawPeak = s; peakFound = 1.0; }
-            s = texture2D(tScene, sampleUv + vec2(0.0, off.y)).rgb; sl = luma(s); if (sl > rawL) { rawL = sl; rawPeak = s; peakFound = 1.0; }
-            s = texture2D(tScene, sampleUv - vec2(0.0, off.y)).rgb; sl = luma(s); if (sl > rawL) { rawL = sl; rawPeak = s; peakFound = 1.0; }
-          }
-          col = grade(col);
-          float l = luma(col);
+          float sl = luma(sR); if (sl > rawL) { rawL = sl; rawPeak = sR; peakFound = 1.0; }
+          sl = luma(sL); if (sl > rawL) { rawL = sl; rawPeak = sL; peakFound = 1.0; }
+          sl = luma(sD); if (sl > rawL) { rawL = sl; rawPeak = sD; peakFound = 1.0; }
+          sl = luma(sU); if (sl > rawL) { rawL = sl; rawPeak = sU; peakFound = 1.0; }
+
+          vec3 gFill = grade(fillRaw);
+          float l = luma(gFill);
           if (peakFound > 0.5) {
             vec3 gp = grade(rawPeak); float gl = luma(gp);
-            float adopt = smoothstep(0.08, 0.30, gl - l);
-            col = mix(col, gp, adopt);
+            float adopt = smoothstep(0.10, 0.34, gl - l);
+            gFill = mix(gFill, gp, adopt);
             l = mix(l, gl, adopt);
+          }
+
+          // --- edges at cell scale (luminance sobel) ---
+          float edgeAmt = 0.0; float egx = 0.0, egy = 0.0;
+          if (uEdge > 0.5) {
+            vec2 t = vec2(cell) / uResolution;
+            float eR = luma(texture2D(tScene, sampleUv + vec2(t.x, 0.0)).rgb);
+            float eL = luma(texture2D(tScene, sampleUv - vec2(t.x, 0.0)).rgb);
+            float eD = luma(texture2D(tScene, sampleUv + vec2(0.0, t.y)).rgb);
+            float eU = luma(texture2D(tScene, sampleUv - vec2(0.0, t.y)).rgb);
+            egx = eR - eL;
+            egy = eD - eU;
+            edgeAmt = clamp(length(vec2(egx, egy)) * 2.2, 0.0, 1.0);
           }
 
           // add a touch of the bright pass (bloom) to luminance only
           float bloom = luma(texture2D(tBright, sampleUv).rgb);
           l += bloom * uBloom;
-          edgeAmt = max(edgeAmt, bloom * 0.7);
+          edgeAmt = max(edgeAmt, bloom * 0.65);
 
-          // choose glyph
-          float lum = clamp(l + edgeAmt * 0.85, 0.0, 1.0);
-          float idx = floor(lum * (uRampLen - 1.0) + 0.001);
+          // choose density glyph from the stable fill
+          float lum = clamp(l, 0.0, 1.0);
+          float idx = floor(lum * (uDensityLen - 1.0) + 0.5);
 
-          // prefer a crisp structural glyph on strong edges
-          if (edgeAmt > 0.55) {
-            idx = max(idx, floor(uRampLen * 0.72));
+          // On strong edges prefer a *structural* glyph chosen by the gradient
+          // orientation, so walls/targets read as crisp line art.
+          if (uEdge > 0.5 && edgeAmt > 0.5) {
+            float adx = abs(egx), ady = abs(egy);
+            float sel;
+            if (adx > ady * 1.45) sel = 0.0;            // vertical edge -> |
+            else if (ady > adx * 1.45) sel = 1.0;       // horizontal edge -> -
+            else sel = (egx * egy > 0.0) ? 3.0 : 2.0;   // \ or /
+            idx = uEdgeBase + sel;
           }
 
           float gx = mod(idx, uFontCols);
@@ -217,14 +249,13 @@ export class AsciiComposer {
           vec2 glyphUv = (vec2(gx, gy) + cellUv) / vec2(uFontCols, uFontRows);
           float glyph = texture2D(tFont, glyphUv).r;
 
-          // glyphs with detail stay readable thanks to 4x downscale AA
-          vec3 outCol = mix(vec3(1.0), col, uColor);
+          vec3 outCol = mix(vec3(1.0), gFill, uColor);
           outCol = mix(uFg * (0.55 + l * 0.9), outCol, uColor);
           vec3 ink = uBg;
           vec3 rgb = mix(ink, outCol, glyph);
 
           // subtle additive glow from bloom
-          rgb += outCol * bloom * uBloom * 0.2;
+          rgb += outCol * bloom * uBloom * 0.18;
 
           // screen effects
           float scan = 1.0 - uScanline * step(0.5, fract(px.y * 0.5));
@@ -322,6 +353,26 @@ export class AsciiComposer {
     this.renderer.render(this.quadScene, this.quadCam);
   }
 
+  setRamp(densityRamp) {
+    this.densityRamp = densityRamp;
+    this.ramp = fullRamp(densityRamp);
+    this.densityLen = densityRamp.length;
+    this.edgeBase = this.densityLen;
+    const old = this.fontTexture;
+    const tex = makeFontAtlas(this.ramp, 32);
+    this.fontTexture = tex;
+    this.fontCols = tex.userData.cols;
+    this.fontRows = tex.userData.rows;
+    const u = this.material.uniforms;
+    u.tFont.value = tex;
+    u.uFontCols.value = this.fontCols;
+    u.uFontRows.value = this.fontRows;
+    u.uRampLen.value = this.ramp.length;
+    u.uDensityLen.value = this.densityLen;
+    u.uEdgeBase.value = this.edgeBase;
+    if (old && old !== tex && old.dispose) old.dispose();
+  }
+
   setHit(v) { this.material.uniforms.uHit.value = v; }
 }
 
@@ -351,9 +402,11 @@ export function makeFontAtlas(ramp, cell = 32) {
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  // No mipmaps: the compose pass samples each glyph on its own cell, and
+  // mipmapping only blurred the strokes. Linear filtering keeps them crisp.
+  tex.minFilter = THREE.LinearFilter;
   tex.magFilter = THREE.LinearFilter;
-  tex.generateMipmaps = true;
+  tex.generateMipmaps = false;
   tex.wrapS = THREE.ClampToEdgeWrapping;
   tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.needsUpdate = true;

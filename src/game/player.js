@@ -34,7 +34,11 @@ export class Player {
     this.airAccel = 12;
     this.friction = 10;
     this.gravity = 22;
-    this.stepHeight = 0.45;
+    // Must clear two staircase risers: interpenetration from the capsule
+    // radius (0.42) reaching one step past the one underfoot means the next
+    // collider can sit ~2*(3.6/14)=0.514 m above the feet. At 0.45 it was
+    // treated as a wall and shoved the player back off the staircase.
+    this.stepHeight = 0.6;
 
     this.maxHealth = 100;
     this.health = 100;
@@ -377,7 +381,15 @@ export class Player {
         this._tmpMax.set(this.pos.x + r, probeY + 0.2, this.pos.z + r),
         [], new Set()
       );
-      if (list.length) return true;
+      // The spatial hash is 2D, so the query returns every collider in the
+      // ground column — including the step we are standing on. Verify the
+      // actual 3D overlap before declaring the headroom blocked.
+      for (const b of list) {
+        if (b.max.y <= probeY + 0.001 || b.min.y >= probeY + 0.2) continue;
+        if (this.pos.x + r <= b.min.x || this.pos.x - r >= b.max.x) continue;
+        if (this.pos.z + r <= b.min.z || this.pos.z - r >= b.max.z) continue;
+        return true;
+      }
     }
     return false;
   }

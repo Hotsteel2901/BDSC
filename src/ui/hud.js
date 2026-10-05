@@ -147,7 +147,7 @@ export class HUD {
           </label>
         </div>
         <div class="row">
-          <label class="field" style="flex:1"><span data-i18n="menu.cell">${t('menu.cell')}</span> <input type="range" id="in-char" min="6" max="20" value="11"></label>
+          <label class="field" style="flex:1"><span data-i18n="menu.cell">${t('menu.cell')}</span> <input type="range" id="in-char" min="6" max="20" value="12"></label>
           <label class="field" style="flex:1"><span data-i18n="menu.music">${t('menu.music')}</span> <input type="range" id="in-music" min="0" max="1" step="0.05" value="0.7"></label>
           <label class="field" style="flex:1"><span data-i18n="menu.sfx">${t('menu.sfx')}</span> <input type="range" id="in-sfx" min="0" max="1" step="0.05" value="0.9"></label>
         </div>

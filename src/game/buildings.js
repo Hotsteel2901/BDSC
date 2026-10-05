@@ -353,7 +353,7 @@ export function buildInterior(rng, parts, b) {
 
     // floor slab for the next level, with a stairwell opening + the staircase
     if (f < b.detailFloors - 1) {
-      addFloorWithStairwell(floorGB, parts, b, y + floorH, w, d, tint);
+      addFloorWithStairwell(floorGB, parts, b, y + floorH, w, d, tint, f);
       addStaircase(rng, wallGB, metal, parts, b, y, f, doorSide);
     } else {
       addTop(floorGB, b.x, y + floorH, b.z, w, d, 4, tint, false);
@@ -435,14 +435,25 @@ function interiorLayout(rng, w, d) {
   return { walls, items };
 }
 
+/**
+ * Stairwell geometry. Two parallel lanes run along the +Z wall: even floors
+ * ascend +X in lane 0, odd floors ascend -X in lane 1 (a switchback). That way
+ * the flight one floor up is in the *other* lane, so it never hangs directly
+ * over the player's head (with a 3.6 m floor and a 1.8 m player a stacked
+ * flight would leave exactly zero clearance and the climb would jam).
+ */
 function stairGeom(b) {
   const steps = 14;
-  const run = Math.min(0.42, Math.max(0.22, (b.w - 2.8) / steps));
-  const x0 = b.x - b.w / 2 + 1.0;
+  const margin = Math.min(1.6, b.w * 0.18);
+  const run = Math.min(0.42, Math.max(0.22, (b.w - margin * 2) / steps));
+  const x0 = b.x - b.w / 2 + margin;
   const x1 = x0 + steps * run;
-  const sz = b.z + b.d / 2 - 0.9;
-  const sw = 1.6;
-  return { steps, run, x0, x1, sz, sw, z0: sz - sw / 2, z1: sz + sw / 2 };
+  const sw = 1.5;          // lane width
+  const gap = 0.2;         // gap between the two lanes
+  const sz = b.z + b.d / 2 - 2.3;
+  const laneZ0 = sz - (sw + gap) / 2;
+  const laneZ1 = sz + (sw + gap) / 2;
+  return { steps, run, x0, x1, sw, laneZ0, laneZ1, sz };
 }
 
 function regionFloor(GB, parts, cx, y, cz, rw, rd, tint) {
@@ -452,41 +463,45 @@ function regionFloor(GB, parts, cx, y, cz, rw, rd, tint) {
   parts.colliders.push(collider(cx, y - 0.3, cz, rw, 0.3, rd, 'floor'));
 }
 
-function addFloorWithStairwell(GB, parts, b, y, w, d, tint) {
+/** Floor slab with a stairwell opening cut only over the lane of flight `floorIdx`. */
+function addFloorWithStairwell(GB, parts, b, y, w, d, tint, floorIdx) {
   const g = stairGeom(b);
   const cx = b.x, cz = b.z;
   const hw = w / 2, hd = d / 2;
+  const laneZ = (floorIdx % 2 === 0) ? g.laneZ0 : g.laneZ1;
   const holeX0 = g.x0 - 0.5, holeX1 = g.x1 + 0.5;
-  const holeZ0 = g.z0 - 0.5;
+  const holeZ0 = laneZ - g.sw / 2 - 0.5;
+  const holeZ1 = laneZ + g.sw / 2 + 0.5;
   // region 1: full width, away from the stairwell (towards -Z)
-  const r1d = (holeZ0) - (cz - hd);
-  regionFloor(GB, parts, cx, y, (cz - hd + holeZ0) / 2, w, r1d, tint);
+  regionFloor(GB, parts, cx, y, (cz - hd + holeZ0) / 2, w, holeZ0 - (cz - hd), tint);
   // region 2 & 3: strips beside the stairwell, towards +Z
   const backD = (cz + hd) - holeZ0;
   const backCz = (holeZ0 + cz + hd) / 2;
-  const r2w = (holeX0) - (cx - hw);
-  regionFloor(GB, parts, (cx - hw + holeX0) / 2, y, backCz, r2w, backD, tint);
-  const r3w = (cx + hw) - (holeX1);
-  regionFloor(GB, parts, (holeX1 + cx + hw) / 2, y, backCz, r3w, backD, tint);
+  regionFloor(GB, parts, (cx - hw + holeX0) / 2, y, backCz, holeX0 - (cx - hw), backD, tint);
+  regionFloor(GB, parts, (holeX1 + cx + hw) / 2, y, backCz, (cx + hw) - holeX1, backD, tint);
+  // region 4: solid floor over the *other* lane (between the hole and the +Z wall)
+  regionFloor(GB, parts, (holeX0 + holeX1) / 2, y, (holeZ1 + cz + hd) / 2, holeX1 - holeX0, (cz + hd) - holeZ1, tint);
 }
 
 function addStaircase(rng, GB, metal, parts, b, y, floorIdx, doorSide) {
   const floorH = b.floorH;
   const g = stairGeom(b);
   const rise = floorH / g.steps;
-  // step geometry + colliders
+  const lane = ((floorIdx % 2) + 2) % 2;
+  const dir = lane === 0 ? 1 : -1;             // lane 0 ascends +X, lane 1 ascends -X
+  const z = lane === 0 ? g.laneZ0 : g.laneZ1;
   for (let s = 0; s < g.steps; s++) {
-    const px = g.x0 + (s + 0.5) * g.run;
+    const px = dir > 0 ? g.x0 + (s + 0.5) * g.run : g.x1 - (s + 0.5) * g.run;
     const top = y + (s + 1) * rise;
-    // visual box from y to top
     const h = top - y;
-    addBox(metal, px, y + h / 2, g.sz, g.run + 0.02, h, g.sw, 2, b.col.clone().multiplyScalar(0.75));
-    parts.colliders.push(collider(px, y, g.sz, g.run + 0.02, h, g.sw, 'stair'));
+    addBox(metal, px, y + h / 2, z, g.run + 0.02, h, g.sw, 2, b.col.clone().multiplyScalar(0.75));
+    parts.colliders.push(collider(px, y, z, g.run + 0.02, h, g.sw, 'stair'));
   }
-  // handrail posts
+  // handrail posts along both edges of the lane
   for (let s = 0; s <= g.steps; s += 3) {
-    const px = g.x0 + s * g.run;
-    const top = y + (s) * rise;
-    addBox(metal, px, top + 0.5, g.sz - g.sw / 2, 0.08, 1.0, 0.08, 1, b.col.clone().multiplyScalar(0.5));
+    const px = dir > 0 ? g.x0 + s * g.run : g.x1 - s * g.run;
+    const top = y + s * rise;
+    addBox(metal, px, top + 0.5, z - g.sw / 2, 0.08, 1.0, 0.08, 1, b.col.clone().multiplyScalar(0.5));
+    addBox(metal, px, top + 0.5, z + g.sw / 2, 0.08, 1.0, 0.08, 1, b.col.clone().multiplyScalar(0.5));
   }
 }

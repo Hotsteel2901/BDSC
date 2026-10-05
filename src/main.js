@@ -52,7 +52,7 @@ class Game {
     this.camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.05, 4000);
     this.scene.add(this.camera);
 
-    this.composer = new AsciiComposer(this.renderer, { charSize: isTouchDevice() ? 13 : 11, ramp: DEFAULT_RAMP });
+    this.composer = new AsciiComposer(this.renderer, { charSize: isTouchDevice() ? 14 : 12, ramp: DEFAULT_RAMP });
     this.composer.setSize(window.innerWidth, window.innerHeight);
     this.input = new Input(this.canvas);
     this.audio = new AudioEngine();
@@ -196,7 +196,7 @@ class Game {
       }
     };
     if (localStorage.getItem('bdsc_ascii') === '0') $('in-ascii').checked = false;
-    if (this.input.touch && localStorage.getItem('bdsc_ascii') !== '0') $('in-char').value = '13';
+    if (this.input.touch && localStorage.getItem('bdsc_ascii') !== '0') $('in-char').value = '14';
     this.composer.enabled = $('in-ascii').checked;
     syncAsciiControls();
 
@@ -241,18 +241,7 @@ class Game {
 
   _reloadRamp() {
     const ramp = document.getElementById('in-ramp').value === '1' ? SYMBOL_RAMP : DEFAULT_RAMP;
-    // regenerate atlas
-    const { makeFontAtlas } = window.__asciiMod || {};
-    if (makeFontAtlas) {
-      const tex = makeFontAtlas(ramp, 32);
-      this.composer.material.uniforms.tFont.value = tex;
-      this.composer.material.uniforms.uRampLen.value = ramp.length;
-      this.composer.material.uniforms.uFontCols.value = tex.userData.cols;
-      this.composer.material.uniforms.uFontRows.value = tex.userData.rows;
-      this.composer.fontCols = tex.userData.cols;
-      this.composer.fontRows = tex.userData.rows;
-      this.composer.ramp = ramp;
-    }
+    this.composer.setRamp(ramp);
     this.composer.setSize(window.innerWidth, window.innerHeight);
   }
 
@@ -636,7 +625,5 @@ function buildAvatar(color) {
 }
 
 /* -------------------------------- bootstrap ------------------------------- */
-import { makeFontAtlas } from './engine/ascii.js';
-window.__asciiMod = { makeFontAtlas };
 const game = new Game();
 window.__game = game;
