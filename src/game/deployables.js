@@ -82,9 +82,10 @@ export class Deployables {
     g.add(body);
     const led = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 6), new THREE.MeshBasicMaterial({ color: 0xff3322, toneMapped: false }));
     led.position.y = 0.08; g.add(led);
-    const light = new THREE.PointLight(0xff3322, 1.5, 4, 2); light.position.y = 0.2; g.add(light);
     g.position.copy(pos); g.position.y += 0.05;
-    return { kind: 'mine', mesh: g, pos: pos.clone(), life: 90, arm: 1.0, led, light };
+    // No dedicated PointLight: adding/removing a light would change the
+    // scene-wide visible-light count and trigger full material recompiles.
+    return { kind: 'mine', mesh: g, pos: pos.clone(), life: 90, arm: 1.0, led };
   }
 
   _barrier(pos, dir) {
@@ -188,7 +189,7 @@ export class Deployables {
         }
       } else if (d.kind === 'mine') {
         d.arm -= dt;
-        if (d.led) { const p = 0.5 + 0.5 * Math.sin(performance.now() * 0.01); d.led.material.color.setRGB(1, p * 0.3, 0); if (d.light) d.light.intensity = 1 + p * 2; }
+        if (d.led) { const p = 0.5 + 0.5 * Math.sin(performance.now() * 0.01); d.led.material.color.setRGB(1, p * 0.3, 0); d.led.scale.setScalar(0.9 + p * 0.8); }
         if (d.arm <= 0) {
           const e = this._nearestEnemy(d.pos.x, d.pos.y + 0.3, d.pos.z, 3.2);
           if (e) {

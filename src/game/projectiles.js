@@ -20,6 +20,16 @@ export class ProjectileManager {
     this.sparkGeo = new THREE.SphereGeometry(0.16, 8, 6);
     this.grenadeGeo = new THREE.IcosahedronGeometry(0.16, 1);
     this.rocketGeo = new THREE.ConeGeometry(0.13, 0.5, 6);
+    // Fixed pool of always-visible glow lights for plasma/rockets. A light per
+    // projectile would change the scene's visible-light count on every shot and
+    // force three.js to recompile all lit materials (explosion-frame hitches).
+    this.lights = [];
+    for (let i = 0; i < 3; i++) {
+      const l = new THREE.PointLight(0xffffff, 0, 12, 2);
+      l.visible = true;
+      this.group.add(l);
+      this.lights.push(l);
+    }
   }
 
   _getMesh(type, color) {
@@ -42,17 +52,11 @@ export class ProjectileManager {
       speed = 0, aoe = 0, kind = null,
     } = opts;
     let p = this.pool.pop();
-    if (!p) p = { mesh: null, light: null };
-    if (p.mesh) { this.group.remove(p.mesh); p.mesh.geometry && null; }
+    if (!p) p = { mesh: null };
+    if (p.mesh) { this.group.remove(p.mesh); }
     p.mesh = this._getMesh(type, color);
     p.mesh.position.copy(pos);
     this.group.add(p.mesh);
-    if (type === 'plasma' || type === 'rocket') {
-      if (!p.light) { p.light = new THREE.PointLight(color, 2.2, 12, 2); this.group.add(p.light); }
-      p.light.visible = true;
-      p.light.color.setHex(color);
-      p.light.position.copy(pos);
-    } else if (p.light) { p.light.visible = false; }
 
     p.pos = pos.clone();
     p.vel = vel.clone();
@@ -163,7 +167,6 @@ export class ProjectileManager {
       } else if (p.type === 'grenade') {
         p.mesh.rotation.x += dt * 6; p.mesh.rotation.y += dt * 4;
       }
-      if (p.light) p.light.position.copy(p.pos);
       // trail
       if (p.type !== 'grenade' && Math.random() < 0.7) {
         this.effects.spawnParticle(p.pos.x, p.pos.y, p.pos.z,
@@ -172,6 +175,20 @@ export class ProjectileManager {
           0.12, 0.25, 0, 2);
       }
     }
+
+    // Assign the fixed glow-light pool to the nearest active plasma/rocket
+    // projectiles; idle pool lights drop to zero intensity (never toggled
+    // visible) so the scene's light count stays constant.
+    let li = 0;
+    for (const p of this.list) {
+      if ((p.type === 'plasma' || p.type === 'rocket') && li < this.lights.length) {
+        const l = this.lights[li++];
+        l.position.copy(p.pos);
+        l.color.setHex(p.color);
+        l.intensity = p.type === 'rocket' ? 2.6 : 2.0;
+      }
+    }
+    for (; li < this.lights.length; li++) this.lights[li].intensity = 0;
   }
 
   _applyDirect(p, eHit, enemies, player) {
@@ -294,7 +311,6 @@ export class ProjectileManager {
   _remove(i, p) {
     p.active = false;
     this.group.remove(p.mesh);
-    if (p.light) { p.light.visible = false; }
     this.list.splice(i, 1);
     if (this.pool.length < 64) this.pool.push(p);
   }
@@ -303,6 +319,7 @@ export class ProjectileManager {
     for (let i = this.list.length - 1; i >= 0; i--) this._remove(i, this.list[i]);
     for (const s of this.smokes) if (s.mesh && s.mesh.parent) s.mesh.parent.remove(s.mesh);
     this.smokes.length = 0;
+    for (const l of this.lights) l.intensity = 0;
   }
 }
 

@@ -102,11 +102,15 @@ export class Effects {
     }
     this.ringNext = 0;
 
-    // flash lights pool
+    // flash lights pool. IMPORTANT: these lights stay `visible` for the whole
+    // session and are faded with `intensity` instead of being toggled off.
+    // three.js bakes the *count* of visible lights into every lit material's
+    // shader program, so hiding/showing a light would recompile the entire
+    // scene's materials and cause a multi-frame hitch (worst on explosions).
     this.flashes = [];
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 4; i++) {
       const l = new THREE.PointLight(0xffaa55, 0, 30, 2);
-      l.visible = false;
+      l.visible = true;
       scene.add(l);
       this.flashes.push({ light: l, life: 0, max: 1, intensity: 1 });
     }
@@ -272,7 +276,6 @@ export class Effects {
   flash(point, color = 0xffaa55, intensity = 8, life = 0.25) {
     const f = this.flashes[this.flashNext];
     this.flashNext = (this.flashNext + 1) % this.flashes.length;
-    f.light.visible = true;
     f.light.position.copy(point);
     f.light.color.setHex(color);
     f.light.intensity = intensity;
@@ -365,13 +368,12 @@ export class Effects {
       }
     }
 
-    // flashes
+    // flashes — always-visible pool, faded to zero (never toggled visible)
     for (const f of this.flashes) {
       if (f.life > 0) {
         f.life -= dt;
         const t = Math.max(0, f.life / f.max);
         f.light.intensity = f.intensity * t * t;
-        if (f.life <= 0) f.light.visible = false;
       }
     }
 

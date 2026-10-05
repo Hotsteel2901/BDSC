@@ -164,10 +164,13 @@ export class World {
 
   _setupLightPool() {
     // A small pool of point lights follows the player to light the nearest lamps.
+    // They stay `visible` permanently and fade to zero intensity when unused:
+    // toggling a light's visibility changes the scene's visible-light count,
+    // which makes three.js recompile every lit material (frame hitches).
     this.lightPool = [];
     for (let i = 0; i < 8; i++) {
       const l = new THREE.PointLight(0xffcc88, 0, 24, 2);
-      l.visible = false;
+      l.visible = true;
       this.scene.add(l);
       this.lightPool.push(l);
     }
@@ -552,13 +555,12 @@ export class World {
       const l = this.lightPool[i];
       const lamp = lamps[i];
       if (lamp) {
-        l.visible = true;
         l.position.set(lamp.min.x, lamp.min.y, lamp.min.z);
         l.color.setHex(lamp.color || 0xffcc88);
         l.intensity = (lamp.intensity ?? 2.2) * 0.9;
         l.distance = lamp.range ?? 22;
       } else {
-        l.visible = false;
+        l.intensity = 0;
       }
     }
   }

@@ -220,10 +220,8 @@ export class WeaponSystem {
     const mat = new THREE.MeshBasicMaterial({ color: 0xa07038, transparent: true, opacity: 0.0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, toneMapped: false });
     const quad = new THREE.Mesh(new THREE.PlaneGeometry(0.12, 0.12), mat);
     root.add(quad);
-    const light = new THREE.PointLight(0xffbb66, 0, 1.5, 2);
-    root.add(light);
     root.visible = false;
-    return { root, quad, light, mat, life: 0 };
+    return { root, quad, mat, life: 0 };
   }
 
   _makeSlash() {
@@ -431,7 +429,6 @@ export class WeaponSystem {
       this.muzzleFlash.life -= dt;
       const t = Math.max(0, this.muzzleFlash.life / 0.06);
       this.muzzleFlash.mat.opacity = t * 0.6;
-      this.muzzleFlash.light.intensity = 0;
       this.muzzleFlash.quad.scale.setScalar(0.4 + (1 - t) * 0.4);
       this.muzzleFlash.root.visible = t > 0;
     }
@@ -733,7 +730,6 @@ export class WeaponSystem {
     this.muzzleFlash.root.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
     this.muzzleFlash.life = 0.05;
     this.muzzleFlash.mat.opacity = 0.6;
-    this.muzzleFlash.light.intensity = 0;
     this.muzzleFlash.quad.scale.setScalar(0.6);
     this.muzzleFlash.root.visible = true;
 
