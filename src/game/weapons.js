@@ -254,6 +254,9 @@ export class WeaponSystem {
   get def() { return this.weapons[this.index].stats; }
   get baseDef() { return this.weapons[this.index].base; }
 
+  /** True when the current weapon has real magnification (DMR / thermal optic). */
+  get scoped() { return (this.def.scope || 1) > 1.05; }
+
   switchTo(i) {
     if (i === this.index || i < 0 || i >= this.weapons.length) return;
     if (this.switching > 0) return;
@@ -408,6 +411,10 @@ export class WeaponSystem {
       this.recoilRot.y - swayX * 3,
       this.recoilRot.y * 1.5 + (this.adsTarget ? 0 : 0.02)
     );
+
+    // While looking through a scope, hide the viewmodel: its solid optic body
+    // would otherwise fill the lens. The HUD scope overlay takes over.
+    m.visible = !(this.scoped && this.ads > 0.5);
   }
 
   _fire() {

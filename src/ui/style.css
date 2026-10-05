@@ -87,6 +87,30 @@ label.field { display:flex; flex-direction:column; gap:4px; font-size:11px; opac
 .bar .full { color: var(--accent); }
 .bar .empty { color: var(--dim); }
 #crosshair { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:16px; color:var(--accent); text-shadow:0 0 6px #000; }
+
+/* ---------- RIFLE SCOPE ---------- */
+/* A real scope: black surround, transparent lens, crosshair + mil ticks.
+   Shown (and the viewmodel hidden) while aiming a scoped weapon. */
+#scope { position:absolute; inset:0; pointer-events:none; opacity:0; }
+#scope.on { opacity:1; }
+#scope .lens {
+  position:absolute; left:50%; top:50%;
+  width:min(80vh,84vw); height:min(80vh,84vw);
+  transform:translate(-50%,-50%);
+  border-radius:50%;
+  box-shadow:0 0 0 200vmax #000,
+             inset 0 0 0 2px rgba(150,255,190,.35),
+             inset 0 0 46px rgba(0,0,0,.92);
+}
+#scope .lens::before, #scope .lens::after { content:''; position:absolute; background:rgba(170,255,205,.8); }
+#scope .lens::before { left:50%; top:5%; bottom:5%; width:1px; transform:translateX(-50%); }
+#scope .lens::after  { top:50%; left:5%; right:5%; height:1px; transform:translateY(-50%); }
+#scope .ticks-v { position:absolute; left:50%; top:20%; bottom:20%; width:9px; transform:translateX(-50%);
+  background:repeating-linear-gradient(to bottom, rgba(170,255,205,.75) 0 1px, transparent 1px 100%); }
+#scope .ticks-h { position:absolute; top:50%; left:20%; right:20%; height:9px; transform:translateY(-50%);
+  background:repeating-linear-gradient(to right, rgba(170,255,205,.75) 0 1px, transparent 1px 100%); }
+#scope .dot { position:absolute; left:50%; top:50%; width:5px; height:5px; margin:-2.5px 0 0 -2.5px; border-radius:50%;
+  background:rgba(175,255,210,.95); box-shadow:0 0 7px rgba(90,255,170,.85); }
 #hitmark { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); color:var(--accent2); font-size:22px; opacity:0; }
 #dmgflash { position:absolute; inset:0; background:radial-gradient(circle, rgba(255,0,40,0) 40%, rgba(255,0,40,.45) 100%); opacity:0; transition:opacity .1s; }
 #toast { position:absolute; left:50%; top:18%; transform:translateX(-50%); text-align:center; font-size:13px; }

@@ -49,7 +49,8 @@ class Game {
     setSrgbSupported(srgbOk);
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(78, window.innerWidth / window.innerHeight, 0.05, 4000);
+    this.baseFov = 78;
+    this.camera = new THREE.PerspectiveCamera(this.baseFov, window.innerWidth / window.innerHeight, 0.05, 4000);
     this.scene.add(this.camera);
 
     this.composer = new AsciiComposer(this.renderer, { charSize: isTouchDevice() ? 14 : 12, ramp: DEFAULT_RAMP });
@@ -493,10 +494,11 @@ class Game {
 
     const active = this.state === 'playing';
 
-    // look
+    // look (scaled by the current zoom so scoped aim stays controllable)
     if (active && this.input.locked) {
       const { dx, dy } = this.input.takeMouse();
-      this.player.applyLook(dx, dy);
+      const zoom = this.camera.fov / this.baseFov;
+      this.player.applyLook(dx * zoom, dy * zoom);
     } else { this.input.takeMouse(); }
 
     // pause via ESC
@@ -590,6 +592,13 @@ class Game {
       this.hud.damageFlash();
     }
     this._prevHealth = this.player.health;
+
+    // scope zoom (DMR scope / thermal optic magnify; plain ADS gets a slight zoom)
+    const targetFov = this.weaponSystem.getScopedFov(this.baseFov);
+    if (Math.abs(this.camera.fov - targetFov) > 0.02) {
+      this.camera.fov = targetFov;
+      this.camera.updateProjectionMatrix();
+    }
 
     // render
     this.composer.setHit(Math.min(1, this._hitPulse || 0));

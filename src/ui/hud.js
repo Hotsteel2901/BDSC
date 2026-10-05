@@ -41,6 +41,7 @@ export class HUD {
     const hud = document.createElement('div');
     hud.id = 'hud';
     hud.innerHTML = `
+      <div id="scope"><div class="lens"><div class="ticks-v"></div><div class="ticks-h"></div><div class="dot"></div></div></div>
       <div class="hud-tl" id="hud-tl"></div>
       <div class="hud-tr" id="hud-tr"></div>
       <div class="hud-bl" id="hud-bl"></div>
@@ -317,6 +318,16 @@ export class HUD {
     const spread = def.spread * 100 + w.spreadBloom * 6;
     ch.textContent = w.ads > 0.5 ? '·' : '+';
     ch.style.fontSize = (14 + spread * 4) + 'px';
+
+    // rifle scope overlay (any weapon with real magnification: DMR + thermal scope)
+    const scopeEl = this.hud.querySelector('#scope');
+    if (scopeEl) {
+      const scoped = (def.scope || 1) > 1.05;
+      const blend = scoped ? Math.min(1, Math.max(0, (w.ads - 0.2) / 0.5)) : 0;
+      scopeEl.style.opacity = blend;
+      scopeEl.classList.toggle('on', blend > 0);
+      ch.style.display = blend > 0.6 ? 'none' : '';
+    }
 
     this._drawMinimap(game);
   }
