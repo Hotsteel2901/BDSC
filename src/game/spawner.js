@@ -36,6 +36,8 @@ export class SpawnDirector {
     this.minSpawnR = 46;
     this.maxSpawnR = 96;
     this.maxAlive = 46;
+    // FUN MODE ("爽玩"): cranked by the game right after reset().
+    this.funMode = false;
     this._objective = t('obj.contact');
     this.surgeCount = 0;
     this.onSurge = null;
@@ -61,19 +63,21 @@ export class SpawnDirector {
     this.surgeCount = 0;
 
     // ---- escalation ----
-    this.threat += dt * 0.018;
+    this.threat += dt * (this.funMode ? 0.05 : 0.018);
     this.noiseBoost = Math.max(0, this.noiseBoost - dt * 0.6);
     if (this.lure) { this.lureTimer -= dt; if (this.lureTimer <= 0) this.lure = null; }
 
+    const FUN = this.funMode;
     const DIFF = ctx.threatMul || 1;      // difficulty scalar
     const DENS = ctx.density || 1;        // density scalar
-    const effThreat = this.threat * DIFF;
+    const effThreat = this.threat * DIFF * (FUN ? 1.6 : 1);
     const district = districtAt(ctx.player.pos.x, ctx.player.pos.z);
-    const dens = DENS * (district.density || 1);
+    const dens = DENS * (district.density || 1) * (FUN ? 3.0 : 1);
 
     const alive = this.enemies.countAlive();
-    const targetAlive = Math.min(this.maxAlive, Math.round((6 + effThreat * 1.35) * dens));
-    const interval = Math.max(0.55, (3.0 - effThreat * 0.07) / (dens * (1 + this.noiseBoost * 0.12)));
+    const cap = FUN ? Math.max(this.maxAlive, 150) : this.maxAlive;
+    const targetAlive = Math.min(cap, Math.round((6 + effThreat * 1.35) * dens));
+    const interval = Math.max(FUN ? 0.15 : 0.55, (3.0 - effThreat * 0.07) / (dens * (1 + this.noiseBoost * 0.12)));
 
     // ---- steady spawning ----
     this.spawnTimer -= dt;
@@ -81,16 +85,22 @@ export class SpawnDirector {
       this.spawnTimer = interval;
       if (alive < targetAlive) {
         const deficit = targetAlive - alive;
-        const pack = Math.max(1, Math.min(4, Math.round(deficit * 0.35) + (Math.random() < 0.3 ? 1 : 0)));
+        const pack = FUN
+          ? Math.max(2, Math.min(10, Math.round(deficit * 0.5) + (Math.random() < 0.5 ? 2 : 0)))
+          : Math.max(1, Math.min(4, Math.round(deficit * 0.35) + (Math.random() < 0.3 ? 1 : 0)));
         this._spawnPack(pack, effThreat, ctx, district);
       }
     }
 
     // ---- surges ----
     this.surgeTimer -= dt;
-    if (this.surgeTimer <= 0 && alive < this.maxAlive - 4) {
-      this.surgeTimer = Math.max(18, 46 - effThreat * 0.8) + Math.random() * 10;
-      const n = Math.max(3, Math.min(9, Math.round((3 + effThreat * 0.35) * dens)));
+    if (this.surgeTimer <= 0 && alive < cap - 4) {
+      this.surgeTimer = FUN
+        ? Math.max(4, 9 - effThreat * 0.2) + Math.random() * 3
+        : Math.max(18, 46 - effThreat * 0.8) + Math.random() * 10;
+      const n = FUN
+        ? Math.max(8, Math.min(24, Math.round((6 + effThreat * 0.8) * dens)))
+        : Math.max(3, Math.min(9, Math.round((3 + effThreat * 0.35) * dens)));
       const centre = this._pickCentre(ctx);
       this.enemies.spawnSquad(centre, n, this._typePool(effThreat, district, true), { spread: 16, district });
       this.surgeCount = n;

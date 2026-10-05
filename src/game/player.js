@@ -40,6 +40,12 @@ export class Player {
     // treated as a wall and shoved the player back off the staircase.
     this.stepHeight = 0.6;
 
+    // FUN MODE ("爽玩") overrides — set by the game at run start. 1 / false are
+    // the neutral values, so normal play is completely unaffected.
+    this.speedMul = 1;
+    this.jumpMul = 1;
+    this.invincible = false;
+
     this.maxHealth = 100;
     this.health = 100;
     this.maxArmor = 100;
@@ -152,7 +158,7 @@ export class Player {
     this.eyeHeight = this.height + this.eyeOffset;
 
     const speedMul = this.buffs ? this.buffs.value('speed') : 1;
-    const maxSpeed = (this.crouching ? this.crouchSpeed : (this.sprinting ? this.sprintSpeed : this.walkSpeed)) * speedMul * (this.statusMods ? this.statusMods.speedMul : 1);
+    const maxSpeed = (this.crouching ? this.crouchSpeed : (this.sprinting ? this.sprintSpeed : this.walkSpeed)) * speedMul * (this.statusMods ? this.statusMods.speedMul : 1) * this.speedMul;
 
     const wish = new THREE.Vector3();
     wish.addScaledVector(forward, iz);
@@ -180,7 +186,7 @@ export class Player {
 
     // --- jump ---
     if (input.down('Space') && this.onGround && !this.bladeRoot) {
-      this.vel.y = this.jumpSpeed * (this.buffs ? this.buffs.value('jump') : 1);
+      this.vel.y = this.jumpSpeed * (this.buffs ? this.buffs.value('jump') : 1) * this.jumpMul;
       this.onGround = false;
       if (this.audio) this.audio.jump();
     }
@@ -401,7 +407,7 @@ export class Player {
   }
 
   takeDamage(amount, fromDir = null, kind = 'generic', point = null) {
-    if (!this.alive) return;
+    if (!this.alive || this.invincible) return;
     // Blade deflection: cut incoming bullets out of the air (weapon buff).
     if (kind === 'bullet' && this.deflectHook && this.deflectHook(kind, point)) return;
     let dmg = amount * (this.buffs ? this.buffs.value('dmgResist') : 1);
@@ -450,10 +456,17 @@ export class Player {
   }
   cure(kind) { if (this.statuses[kind]) delete this.statuses[kind]; }
   applyStatus(kind, dur, power = 1) {
+    if (this.invincible) return;
     if (this.statuses[kind]) { this.statuses[kind].t = Math.max(this.statuses[kind].t, dur); }
     else this.statuses[kind] = { t: dur, dur, power, stacks: 1 };
   }
   _tickStatuses(dt) {
+    // Invincible (FUN MODE): immune to DoT and crowd-control entirely.
+    if (this.invincible) {
+      this.statuses = {};
+      this.statusMods = { speedMul: 1, dmgTakenMul: 1, dps: 0, dmgDealtMul: 1, fireMul: 1 };
+      return;
+    }
     let dps = 0, speedMul = 1, dmgTaken = 1;
     for (const k in this.statuses) {
       const s = this.statuses[k];

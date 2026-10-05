@@ -19,7 +19,7 @@ import { Buffs } from './game/buffs.js';
 import { Inventory } from './game/items/inventory.js';
 import { LootSystem } from './game/items/loot.js';
 import { Deployables } from './game/deployables.js';
-import { Progression, makeAttachResolver } from './game/progression.js';
+import { Progression, makeAttachResolver, MAX_WEAPON_LEVEL, NODE_IDS, TREE } from './game/progression.js';
 import { ITEMS_BY_ID } from './game/items/registry.js';
 import { applyItemEffect } from './game/items/effects.js';
 import { districtAt } from './game/districts.js';
@@ -132,6 +132,7 @@ class Game {
     this.scene.add(this.avatarGroup);
     this.objectiveText = t('obj.awaiting');
     this.config = { difficulty: 1, density: 1, track: 0 };
+    this.funMode = false;
     this._lastChunks = 0;
     this._netAcc = 0;
     this._lowHealthWarn = 0;
@@ -239,6 +240,17 @@ class Game {
       applyContentLanguage();
       this.hud.refreshLanguage();
     });
+    // FUN MODE ("爽玩"): overrides difficulty / density / track entirely.
+    const funEl = $('in-fun');
+    const syncFunMode = () => {
+      const on = funEl.checked;
+      for (const id of ['in-diff', 'in-density', 'in-track']) {
+        const el = $(id);
+        if (el) el.disabled = on;
+      }
+    };
+    funEl.addEventListener('change', syncFunMode);
+    syncFunMode();
     $('btn-resume').addEventListener('click', () => this.setPaused(false));
     $('btn-arsenal').addEventListener('click', () => this.openArsenal());
     $('btn-quit').addEventListener('click', () => this.quitToMenu());
@@ -297,6 +309,8 @@ class Game {
     this.config.difficulty = parseFloat(document.getElementById('in-diff').value);
     this.config.density = parseFloat(document.getElementById('in-density').value);
     this.config.track = parseInt(document.getElementById('in-track').value, 10);
+    const funEl = document.getElementById('in-fun');
+    this.funMode = !!(funEl && funEl.checked);
 
     this.enemies.difficulty = {
       aimSpeed: this.config.difficulty,
@@ -327,7 +341,10 @@ class Game {
     if (!this._isClient) this._isHost = true;
     this.enemies.net = this.net;
 
-    this.dnb.setTrack(this.config.track);
+    // FUN MODE force-plays its exclusive, relentless BGM and ignores the
+    // difficulty/density/track selections.
+    if (this.funMode) this.dnb.setTrack('berserk');
+    else this.dnb.setTrack(this.config.track);
     this.dnb.start();
     this.audio.startAmbience();
 
@@ -357,9 +374,58 @@ class Game {
     this.player.shield = 0; this.player.shieldDecay = 0;
     const spawn = this.world.findStreetSpawn(this.player.pos.x + 4, this.player.pos.z + 4);
     this.player.reset(spawn, Math.PI * 0.25);
+    // Always start a run from neutral player modifiers, then layer FUN MODE on.
+    this.player.invincible = false;
+    this.player.speedMul = 1;
+    this.player.jumpMul = 1;
+    if (this.funMode) this._applyFunMode();
     this.objectiveText = t('obj.inbound');
     this.hud.toast(opts.solo ? t('msg.solo') : (this._isHost ? t('msg.hosting') : t('msg.joined')));
+    if (this.funMode) this.hud.toast(t('msg.funmode'));
     if (this.input.touch) this.hud.toast(t('touch.hint'));
+  }
+
+  /**
+   * FUN MODE ("爽玩"): a pure power fantasy — the player is invincible and
+   * faster, every weapon is max level with every mod-tree node unlocked and
+   * best-in-slot attachments, ammo/grenades/scrap are effectively unlimited,
+   * and the SpawnDirector floods the map with hostiles.
+   */
+  _applyFunMode() {
+    const p = this.player;
+    p.invincible = true;
+    p.speedMul = 1.6;
+    p.jumpMul = 1.25;
+    p.health = p.maxHealth;
+    p.armor = p.maxArmor;
+
+    // Max every weapon: level 20 plus the entire mod tree (both exclusive
+    // branches included — this is a power fantasy, not a fair build).
+    for (const w of this.weaponSystem.weapons) {
+      const st = this.progression.stateFor(w.base.id);
+      st.level = MAX_WEAPON_LEVEL;
+      st.xp = 0;
+      st.mp = 0;
+      st.nodes = [...NODE_IDS];
+      st.spent = st.nodes.reduce((n, id) => n + (TREE[id] ? TREE[id].cost : 0), 0);
+    }
+    // Best-in-slot attachments on every weapon (assigned directly, no inventory).
+    const best = { muzzle: 'heavy_barrel', optic: 'thermal_scope', magazine: 'drum_mag', underbarrel: 'explosive_kit', grip: 'match_trigger' };
+    for (const w of this.weaponSystem.weapons) {
+      w.attachments = {};
+      for (const slot in best) if (ITEMS_BY_ID[best[slot]]) w.attachments[slot] = best[slot];
+      this.weaponSystem.recompute(w);
+      w.ammo = w.mag;
+      w.reserve = 9999;
+    }
+    this.grenades = 99;
+    this.progression.scrap = Math.max(this.progression.scrap, 99999);
+
+    // Hyper-spawning horde: tighter annulus, higher cap, no recycling.
+    this.spawner.funMode = true;
+    this.spawner.minSpawnR = 30;
+    this.spawner.maxSpawnR = 74;
+    this.spawner.despawnR = 280;
   }
 
   setPaused(on) {
@@ -597,7 +663,7 @@ class Game {
 
     // music intensity from combat pressure
     const nearCombat = this.enemies.list.some(e => e.alive && e.state === 'combat' && e.pos.distanceTo(this.player.pos) < 40);
-    this.dnb.setIntensity(nearCombat ? 1.35 : (this.enemies.countAlive() > 0 ? 1.1 : 0.8));
+    this.dnb.setIntensity(this.funMode ? 1.6 : (nearCombat ? 1.35 : (this.enemies.countAlive() > 0 ? 1.1 : 0.8)));
 
     // damage feedback
     if (this._prevHealth !== undefined && this.player.health < this._prevHealth - 0.01) {

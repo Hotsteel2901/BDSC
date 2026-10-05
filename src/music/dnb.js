@@ -129,6 +129,26 @@ export const TRACKS = [
     padMix: 0.9, reeseMix: 0.5, subMix: 0.9,
     arrangement: [SEC.intro(12, { arp: 0.5, energy: 0.78 }), SEC.build(16, { arp: 0.6 }), SEC.drop1(32), SEC.break(20, { arp: 1.1, pad: 1.15 }), SEC.drop2(32), SEC.outro(20)],
   },
+  {
+    // Exclusive BGM for FUN MODE ("爽玩"): relentless jump-up neuro at 182 BPM.
+    // Never offered in the normal track list (funOnly) — the game force-plays it.
+    id: 'berserk',
+    name: 'BERSERK PROTOCOL',
+    bpm: 182, root: 40, scale: PHRYGIAN, mood: 'hyper neurowave',
+    funOnly: true,
+    kick:   [1,0,0,0, 1,0,1,0, 0,0,1,0, 1,0,1,0],
+    snare:  [0,0,0,0, 1,0,0,1, 0,0,0,0, 1,0,0,1],
+    ghost:  [0,1,0,1, 0,1,0,1, 0,1,0,1, 0,1,0,1],
+    hat:    [1,1,1,1, 1,1,1,1, 1,1,1,1, 1,1,1,1],
+    open:   [0,0,0,0, 0,0,1,0, 0,0,0,0, 0,0,1,0],
+    ride:   [1,0,1,0, 1,0,1,0, 1,0,1,0, 1,0,1,0],
+    shaker: [0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0],
+    progression: [[0,1,4],[0,1,6],[3,1,4],[0,4,6]],
+    bass:   [0,0,0,1, 0,0,0,0, 0,0,1,0, 0,0,0,2],
+    arp:    [0,1,4,7,12],
+    padMix: 0.4, reeseMix: 1.25, subMix: 1.35,
+    arrangement: [SEC.intro(4, { drums: 0.7, energy: 0.9 }), SEC.build(8), SEC.drop1(40), SEC.break(8, { hats: 0.6 }), SEC.drop2(48, { energy: 1.4 }), SEC.outro(12)],
+  },
 ];
 
 export class DnBEngine {

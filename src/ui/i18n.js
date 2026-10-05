@@ -32,6 +32,7 @@ const EN = {
   'menu.density.normal': 'NORMAL',
   'menu.density.high': 'HIGH',
   'menu.density.swarm': 'SWARM',
+  'menu.fun': 'FUN MODE',
   'menu.track': 'D&B TRACK',
   'menu.cell': 'ASCII CELL',
   'menu.music': 'MUSIC',
@@ -84,6 +85,7 @@ const EN = {
   'hud.you': 'YOU',
   'hud.reveal': '{mode} ACTIVE',
   'hud.level': 'LV {lv}',
+  'hud.funmode': '⚡ FUN MODE',
 
   // ---- inventory ----
   'inv.title': 'INVENTORY',
@@ -129,6 +131,7 @@ const EN = {
   'msg.noHeal': 'NO HEALING ITEMS',
   'msg.surge': 'SURGE — {n} HOSTILES · {dname}',
   'msg.solo': 'SOLO DEPLOYMENT — ENDLESS ASSAULT',
+  'msg.funmode': 'FUN MODE — INVINCIBLE · MAXED ARSENAL · HYPER SPAWNS',
   'msg.hosting': 'HOSTING CO-OP — ENDLESS ASSAULT',
   'msg.joined': 'JOINED CO-OP',
   'msg.relayDown': 'RELAY DISCONNECTED',
@@ -235,6 +238,7 @@ const ZH = {
   'menu.density.normal': '普通',
   'menu.density.high': '高',
   'menu.density.swarm': '蜂拥',
+  'menu.fun': '爽玩模式',
   'menu.track': 'D&B 曲目',
   'menu.cell': 'ASCII 格子',
   'menu.music': '音乐',
@@ -285,6 +289,7 @@ const ZH = {
   'hud.you': '你',
   'hud.reveal': '{mode} 已激活',
   'hud.level': '等级 {lv}',
+  'hud.funmode': '⚡ 爽玩模式',
 
   'inv.title': '物品栏',
   'inv.weight': '负重',
@@ -327,6 +332,7 @@ const ZH = {
   'msg.noHeal': '没有可用的治疗物品',
   'msg.surge': '突袭——{n} 名敌人 · {dname}',
   'msg.solo': '单人部署——无尽攻势',
+  'msg.funmode': '爽玩模式——无敌 · 全武器满级 · 敌人狂刷',
   'msg.hosting': '正在主持联机——无尽攻势',
   'msg.joined': '已加入联机',
   'msg.relayDown': '中继连接断开',

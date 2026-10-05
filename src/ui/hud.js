@@ -144,8 +144,9 @@ export class HUD {
             </select>
           </label>
           <label class="field"><span data-i18n="menu.track">${t('menu.track')}</span>
-            <select id="in-track">${TRACKS.map((tr, i) => `<option value="${i}">${tr.name}</option>`).join('')}</select>
+            <select id="in-track">${TRACKS.map((tr, i) => ({ tr, i })).filter(x => !x.tr.funOnly).map(x => `<option value="${x.i}">${x.tr.name}</option>`).join('')}</select>
           </label>
+          <label class="field"><span data-i18n="menu.fun">${t('menu.fun')}</span><input type="checkbox" id="in-fun"></label>
         </div>
         <div class="row">
           <label class="field" style="flex:1"><span data-i18n="menu.cell">${t('menu.cell')}</span> <input type="range" id="in-char" min="6" max="20" value="12"></label>
@@ -257,6 +258,7 @@ export class HUD {
     this._set('hud-tl',
       `<div style="color:var(--accent);font-size:13px">BDSC // GRIDFALL</div>
        <div style="color:${dcol};margin-top:2px">${dname}</div>
+       ${game.funMode ? `<div style="color:var(--accent2)">${t('hud.funmode')}</div>` : ''}
        <div style="margin-top:6px">${t('hud.hp')} <span class="bar">${hpBar}</span> ${Math.ceil(p.health)}</div>
        <div>${t('hud.ar')} <span class="bar">${arBar}</span> ${Math.ceil(p.armor)}</div>
        ${shLine}
