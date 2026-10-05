@@ -60,6 +60,9 @@ export class Player {
     this.statusMods = { speedMul: 1, dmgTakenMul: 1, dps: 0, dmgDealtMul: 1, fireMul: 1 };
     this.cloaked = false;
     this._dashCd = 0;
+    // Blade-deflection brace: while true the weapon system is rooting the player.
+    this.bladeRoot = false;
+    this.deflectHook = null;
 
     this.bobTime = 0;
     this.bobAmount = 0;
@@ -136,6 +139,9 @@ export class Player {
     }
     this.moveInput.set(ix, iz);
 
+    // Braced blade deflection roots the player in place until they release LMB.
+    if (this.bladeRoot) { ix = 0; iz = 0; mag = 0; }
+
     this.crouching = input.down('ControlLeft') || input.down('KeyC');
     // touch: pushing the stick to the edge auto-sprints (no shift key needed)
     const wantSprint = (input.down('ShiftLeft') || (input.touch && mag > 0.85)) && iz > 0.15 && !this.crouching;
@@ -173,7 +179,7 @@ export class Player {
     }
 
     // --- jump ---
-    if (input.down('Space') && this.onGround) {
+    if (input.down('Space') && this.onGround && !this.bladeRoot) {
       this.vel.y = this.jumpSpeed * (this.buffs ? this.buffs.value('jump') : 1);
       this.onGround = false;
       if (this.audio) this.audio.jump();
@@ -394,8 +400,10 @@ export class Player {
     return false;
   }
 
-  takeDamage(amount, fromDir = null) {
+  takeDamage(amount, fromDir = null, kind = 'generic', point = null) {
     if (!this.alive) return;
+    // Blade deflection: cut incoming bullets out of the air (weapon buff).
+    if (kind === 'bullet' && this.deflectHook && this.deflectHook(kind, point)) return;
     let dmg = amount * (this.buffs ? this.buffs.value('dmgResist') : 1);
     // armour absorbs 60% of incoming damage
     if (this.armor > 0) {

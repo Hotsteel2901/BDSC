@@ -74,6 +74,8 @@ class Game {
     this.enemies.net = this.net;
     this.weaponSystem.ctx.net = this.net;
     this.weaponSystem.ctx.stats = this;
+    // route incoming bullets through the melee blade-deflection buff
+    this.player.deflectHook = (kind, point) => this.weaponSystem.tryDeflect(kind, point);
 
     // ---- new systems: buffs, inventory, progression, loot, deployables, spawns ----
     this.buffs = new Buffs();
@@ -134,6 +136,7 @@ class Game {
     this._netAcc = 0;
     this._lowHealthWarn = 0;
     this._shake = 0;
+    this._hitStop = 0;   // brief global time-stop on heavy melee impacts
     this.menuOpen = false;
 
     // spawn player at a street
@@ -491,6 +494,13 @@ class Game {
     this.last = now;
     if (dt > 0.05) dt = 0.05;
     if (dt <= 0) dt = 0.0001;
+
+    // Heavy melee impacts briefly slow the whole simulation (hit-stop) so the
+    // blow lands with weight.
+    if (this.state === 'playing' && this._hitStop > 0) {
+      this._hitStop -= dt;
+      dt *= 0.12;
+    }
 
     this._fpsAcc += dt; this._fpsCount++;
     if (this._fpsAcc >= 0.5) { this.fps = Math.round(this._fpsCount / this._fpsAcc); this._fpsAcc = 0; this._fpsCount = 0; }

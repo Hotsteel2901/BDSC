@@ -824,7 +824,7 @@ export class Enemy {
       // apply accuracy roll
       if (Math.random() < 0.35 + acc * 0.65) {
         hitPlayer = true;
-        tgt.takeDamage(wep.dmg * ctx.difficulty.damage * (this.statusMods ? this.statusMods.dmgDealtMul : 1));
+        tgt.takeDamage(wep.dmg * ctx.difficulty.damage * (this.statusMods ? this.statusMods.dmgDealtMul : 1), shotDir, 'bullet', muzzleWorld);
         if (ctx.audio) ctx.audio.hurt(Math.min(1, wep.dmg / 25));
       }
     }

@@ -310,6 +310,9 @@ export class HUD {
     for (const k in p.statuses) { chips.push(`<div class="chip" style="border-color:${statusColor(k)}">${statusName(k)} <span class="t">${Math.ceil(p.statuses[k].t)}s</span></div>`); }
     for (const b of game.buffs.list()) { chips.push(`<div class="chip">${buffName(b.label)} <span class="t">${Math.ceil(b.remaining)}s</span></div>`); }
     if (game.revealActive) chips.push(`<div class="chip" style="border-color:var(--accent2)">${t('hud.reveal', { mode: revealName(game.reveal.mode) })}</div>`);
+    if (w.weapon.stats.melee && w._deflect > 0.01) {
+      chips.push(`<div class="chip" style="border-color:var(--accent2)">${t('hud.parry')} ${Math.round(w._deflect * 100)}%</div>`);
+    }
     const sce = this.hud.querySelector('#statuschips');
     if (sce) sce.innerHTML = chips.join('');
 

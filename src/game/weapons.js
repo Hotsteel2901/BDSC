@@ -76,6 +76,13 @@ export class WeaponSystem {
     this._melee = null;      // { t, dur, variant, hitAt, hit, freeze, hitCount }
     this._combo = 0;         // advances per swing, wraps 0..2
     this._comboTimer = 0;    // resets the combo when idle
+    // Blade-deflection buff: earned by holding a swing for >5s. The chance
+    // scales with how slowly you move; fully braced = 100% but rooted until you
+    // release the button.
+    this._meleeHold = 0;
+    this._deflect = 0;
+    this._deflectActive = false;
+    this._deflectStep = 0;
     this.lastShotTime = 0;
     this.onKillCallback = null;
     this.buildModels();
@@ -181,16 +188,18 @@ export class WeaponSystem {
       }
       case 'dao': {
         // A Tang dao: pommel, wrapped grip, disc guard, a long single-edged
-        // blade with a bright emissive edge (reads as a line in ASCII).
-        const bladeMat = new THREE.MeshStandardMaterial({ color: 0xdfe9f2, metalness: 0.95, roughness: 0.18, emissive: 0x2a3a44, emissiveIntensity: 0.6 });
-        const edgeMat = new THREE.MeshStandardMaterial({ color: 0x9ff0ff, emissive: 0x8ff0ff, emissiveIntensity: 2.0, roughness: 0.25, toneMapped: false });
-        g.add(this._box(0.07, 0.07, 0.30, 0, 0, 0.17, D));            // grip
-        g.add(this._box(0.09, 0.09, 0.05, 0, 0, 0.335, accent));        // pommel
-        g.add(this._box(0.24, 0.035, 0.055, 0, 0, 0.005, accent));      // disc guard
-        // blade: width on X, thin on Y, long on -Z, with a slight back-sweep
-        g.add(this._box(0.055, 0.022, 1.18, 0, 0.004, -0.62, bladeMat));
-        g.add(this._box(0.014, 0.028, 1.16, 0.021, 0.004, -0.62, edgeMat)); // sharp edge highlight
-        g.add(this._box(0.05, 0.02, 0.22, 0.012, 0.006, -1.24, bladeMat));  // upswept tip
+        // blade with a bright emissive edge. Kept *slim and modestly lit* — a
+        // wide/over-bright blade smears into a slab under the ASCII bloom.
+        const bladeMat = new THREE.MeshStandardMaterial({ color: 0xd7e2ec, metalness: 0.9, roughness: 0.22, emissive: 0x223038, emissiveIntensity: 0.5 });
+        const edgeMat = new THREE.MeshStandardMaterial({ color: 0x9ff0ff, emissive: 0x7fe0f0, emissiveIntensity: 1.15, roughness: 0.3, toneMapped: false });
+        g.add(this._box(0.07, 0.07, 0.34, 0, 0, -0.22, D));           // grip
+        g.add(this._box(0.09, 0.09, 0.05, 0, 0, -0.035, accent));      // pommel
+        g.add(this._box(0.26, 0.035, 0.055, 0, 0, -0.41, accent));     // disc guard
+        // long blade (1.85 m), thin profile
+        g.add(this._box(0.042, 0.018, 1.72, 0, 0.006, -1.32, bladeMat));
+        g.add(this._box(0.010, 0.024, 1.70, 0.017, 0.006, -1.32, edgeMat));
+        g.add(this._box(0.038, 0.016, 0.30, 0.012, 0.008, -2.32, bladeMat));  // tip
+        g.add(this._box(0.009, 0.022, 0.28, 0.024, 0.008, -2.32, edgeMat));
         break;
       }
       default: {
@@ -376,12 +385,17 @@ export class WeaponSystem {
       // fire
       const w = this.weapon;
       const adsHeld = input.mouseDown(2);
+      const fireHeld = input.mouseDown(0);
       if (w.stats.melee) {
         // melee: hold LMB to chain swings; RMB is a subtle guard (no zoom)
         this.adsTarget = adsHeld ? 0.35 : 0;
         this.ads += (this.adsTarget - this.ads) * Math.min(1, dt * 10);
-        if (this.switching <= 0 && this.cooldown <= 0 && input.mouseDown(0)) this._swing();
+        if (this.switching <= 0 && this.cooldown <= 0 && fireHeld) this._swing();
+        // continuous-hold meter -> blade deflection buff
+        if (fireHeld) this._meleeHold = Math.min(12, this._meleeHold + dt);
+        else this._meleeHold = 0;
       } else {
+        this._meleeHold = 0;
         const semi = w.stats.mode === 'semi' || w.stats.mode === 'pump';
         const wantFire = semi ? input.mousePressed(0) : input.mouseDown(0);
         // ADS
@@ -400,6 +414,9 @@ export class WeaponSystem {
       this.adsTarget = 0;
       this.ads += (0 - this.ads) * Math.min(1, dt * 8);
     }
+
+    // blade-deflection buff (only meaningful while holding a melee swing)
+    this._updateDeflect(dt, active && input.mouseDown(0));
 
     // melee swing timeline (advances even while paused just to settle)
     this._tickMelee(dt);
@@ -481,33 +498,41 @@ export class WeaponSystem {
     const swing = this._melee;
     const bobX = Math.sin(this.time * 9) * 0.014 * bob;
     const bobY = Math.abs(Math.cos(this.time * 9)) * 0.012 * bob;
+    let pose;
     if (!swing) {
-      // resting guard
-      m.position.set(0.34 + swayX + bobX, -0.34 + swayY + bobY - drop, -0.56);
-      m.rotation.set(-0.22 - swayY * 2, -0.38 - swayX * 3, -0.5);
-      return;
+      pose = DAO_IDLE;
+    } else {
+      const p = THREE.MathUtils.clamp(swing.t / swing.dur, 0, 1);
+      const v = swing.variant;
+      const wind = DAO_WIND[v], end = DAO_END[v];
+      if (p < 0.28) {
+        // wind-up: ease from the ready stance into the cocked pose (no pop)
+        pose = lerpPose(DAO_IDLE, wind, THREE.MathUtils.smoothstep(p / 0.28, 0, 1));
+      } else if (p < 0.60) {
+        // the cut: fast ease-out
+        const u = (p - 0.28) / 0.32;
+        pose = lerpPose(wind, end, 1 - Math.pow(1 - u, 3));
+      } else {
+        // follow-through: settle at the end pose
+        const u = (p - 0.60) / 0.40;
+        pose = lerpPose(end, end, THREE.MathUtils.smoothstep(u, 0, 1));
+      }
     }
-    const p = THREE.MathUtils.clamp(swing.t / swing.dur, 0, 1);
-    const easeOut = (x) => 1 - (1 - x) * (1 - x);
-    let k;
-    if (p < 0.22) k = (p / 0.22) * 0.12;                       // wind-up
-    else if (p < 0.62) k = 0.12 + easeOut((p - 0.22) / 0.40) * 0.78; // strike
-    else k = 0.90 + ((p - 0.62) / 0.38) * 0.10;                // recover
-    const lunge = Math.sin(Math.PI * k) * 0.10;
-    const v = swing.variant;
-    let px, py, pz, rx, ry, rz;
-    if (v === 0) {            // horizontal right→left
-      px = 0.56 + (-0.30 - 0.56) * k; py = -0.30 + Math.sin(Math.PI * k) * 0.03; pz = -0.48;
-      rx = -0.14; ry = -0.95 + 1.80 * k; rz = -0.36 + 0.62 * k;
-    } else if (v === 1) {     // overhead chop
-      px = 0.04; py = 0.30 + (-0.54 - 0.30) * k; pz = -0.42 - 0.18 * k;
-      rx = -1.15 + 2.00 * k; ry = 0.10; rz = 0.10;
-    } else {                  // rising diagonal left→right
-      px = -0.32 + 0.82 * k; py = -0.52 + 0.38 * k; pz = -0.50;
-      rx = 0.35 - 0.70 * k; ry = 0.90 - 1.60 * k; rz = 0.35 - 0.65 * k;
+    let lunge = 0;
+    if (swing) {
+      const p = THREE.MathUtils.clamp(swing.t / swing.dur, 0, 1);
+      lunge = Math.sin(Math.PI * Math.min(1, p / 0.62)) * 0.12;
     }
-    m.position.set(px + swayX - this.recoilKick.x, py + swayY - drop - this.recoilKick.y, pz + this.recoilKick.z - lunge);
-    m.rotation.set(rx + this.recoilRot.x, ry + this.recoilRot.y - swayX * 1.5, rz + swayY * 1.5);
+    m.position.set(
+      pose[0] + swayX + bobX - this.recoilKick.x,
+      pose[1] + swayY + bobY - drop - this.recoilKick.y,
+      pose[2] + this.recoilKick.z - lunge
+    );
+    m.rotation.set(
+      pose[3] + this.recoilRot.x - swayY * 2,
+      pose[4] + this.recoilRot.y - swayX * 1.2,
+      pose[5] + swayY * 1.2
+    );
   }
 
   _animateSlash(dt) {
@@ -515,12 +540,14 @@ export class WeaponSystem {
     if (!s || s.life <= 0) return;
     const t = 1 - s.life / s.max;          // 0..1
     const v = s.variant;
-    const rot0 = v === 0 ? -0.55 : v === 1 ? 1.30 : -1.15;
-    const sweep = v === 0 ? 2.10 : v === 1 ? -1.90 : 1.95;
+    const rot0 = v === 0 ? -0.25 : v === 1 ? 1.45 : -1.15;
+    const sweep = v === 0 ? 2.50 : v === 1 ? -2.70 : 2.50;
     s.root.rotation.z = rot0 + sweep * THREE.MathUtils.smoothstep(t, 0, 1);
     const env = Math.sin(Math.PI * Math.min(1, t * 1.05));
-    s.mat.opacity = env * 0.5;
-    s.root.scale.setScalar(0.74 + 0.16 * t);
+    const dim = v === 1 ? 0.34 : 0.5;
+    const shrink = v === 1 ? 0.58 : 0.80;
+    s.mat.opacity = env * dim;
+    s.root.scale.setScalar((0.74 + 0.16 * t) * shrink);
   }
 
   /** Begin one melee swing (combo index cycles the three variants). */
@@ -530,7 +557,7 @@ export class WeaponSystem {
     const variant = this._combo % 3;
     this._combo = (this._combo + 1) % 3;
     this._comboTimer = 0.55;
-    this._melee = { t: 0, dur, variant, hitAt: dur * 0.35, hit: false, freeze: 0, hits: 0 };
+    this._melee = { t: 0, dur, variant, hitAt: dur * 0.42, hit: false, freeze: 0, hits: 0 };
     this.cooldown = dur * 0.84;
     const a = this.ctx.audio;
     if (a && a.swordSwing) a.swordSwing(variant);
@@ -560,7 +587,52 @@ export class WeaponSystem {
     }
   }
 
-  /** Resolve a swing's damage against every enemy inside the arc. */
+  /**
+   * Blade deflection: after holding a melee swing for >5s, incoming bullets can
+   * be cut out of the air. The chance rises as you slow down (100% when braced
+   * still — but you're rooted until you release), and decays toward 20% at a
+   * full sprint. Releasing LMB (or single-tapping) resets it to zero.
+   */
+  _updateDeflect(dt, holding) {
+    const player = this.ctx.player;
+    const eligible = holding && !!this.def.melee && this._meleeHold > 5;
+    if (!eligible) {
+      this._deflect = 0;
+      this._deflectActive = false;
+      if (player) player.bladeRoot = false;
+      return;
+    }
+    const speed = player.speed;
+    if (speed <= 0.25 && player.onGround) {
+      this._deflect = 1.0;
+      player.bladeRoot = true;                  // braced: rooted in place
+    } else {
+      const t = Math.min(1, speed / Math.max(1, player.sprintSpeed));
+      this._deflect = Math.max(0.2, 0.5 - 0.3 * t);
+      player.bladeRoot = false;
+    }
+    this._deflectActive = true;
+  }
+
+  /** Called from Player.takeDamage for bullet hits. Returns true if deflected. */
+  tryDeflect(kind, point) {
+    if (kind !== 'bullet' || !this._deflectActive || this._deflect <= 0) return false;
+    if (Math.random() > this._deflect) return false;
+    const ctx = this.ctx;
+    const player = ctx.player;
+    const p = point ? new THREE.Vector3(point.x, point.y, point.z) : player.eyePos;
+    this._deflectStep = (this._deflectStep + 1) % 6;
+    if (ctx.audio && ctx.audio.swordDeflect) ctx.audio.swordDeflect(this._deflectStep, this._deflect);
+    if (ctx.effects) {
+      ctx.effects.burst(p, new THREE.Vector3(0, 1, 0), 'metal', 10, 0.9);
+      if (ctx.effects.flash) ctx.effects.flash(p, 0xbfe9ff, 3, 0.12);
+    }
+    if (ctx.hud && ctx.hud.hitmark) ctx.hud.hitmark(true);
+    player.viewShake = Math.min(1, player.viewShake + 0.06);
+    return true;
+  }
+
+  /** Resolves a swing's damage against every enemy inside the arc. */
   _meleeHit(m) {
     const ctx = this.ctx;
     const def = this.def;
@@ -602,11 +674,15 @@ export class WeaponSystem {
     m.hits = count;
     const a = ctx.audio;
     if (count > 0) {
-      m.freeze = 0.055 + 0.02 * Math.min(2, count);        // 砍中有阻力
-      player.viewShake = Math.min(1.0, player.viewShake + 0.16 + 0.05 * count);
-      player.addRecoil(0.010, (Math.random() - 0.5) * 0.006);
-      this.recoilKick.set((Math.random() - 0.5) * 0.03, 0.01, 0.06);
-      this.recoilRot.set(-0.08, (Math.random() - 0.5) * 0.08);
+      // 阻力: the swing slams to a stop, the blade is shoved back, the camera
+      // kicks and the whole sim hit-stops for a beat.
+      m.freeze = 0.035;
+      m.t = Math.max(m.t, m.hitAt);          // hold the pose at the moment of contact
+      this.recoilKick.set((Math.random() - 0.5) * 0.03, 0.03, 0.16);
+      this.recoilRot.set(-0.13, (Math.random() - 0.5) * 0.10);
+      player.viewShake = Math.min(1.1, player.viewShake + 0.20 + 0.06 * count);
+      player.addRecoil(0.014, (Math.random() - 0.5) * 0.008);
+      if (this.ctx.stats) this.ctx.stats._hitStop = 0.06;   // global impact stop
       if (a && a.swordHit) a.swordHit(anyHead ? 'head' : 'flesh', 1 + 0.2 * count);
       if (ctx.hud) ctx.hud.hitmark(anyHead);
       if (a) a.duckMusic(0.22, 0.4);
@@ -849,22 +925,42 @@ function makeSlashTexture() {
   const x = c.getContext('2d');
   x.clearRect(0, 0, 256, 256);
   x.translate(128, 128);
-  const r = 92;
-  const a0 = -0.55, a1 = 1.05;
-  const steps = 46;
+  const r = 94;
+  const a0 = -0.80, a1 = 1.25;
+  const steps = 52;
   for (let i = 0; i < steps; i++) {
     const t = i / (steps - 1);
     const a = a0 + (a1 - a0) * t;
-    const alpha = Math.pow(1 - t, 1.5) * 0.7;
+    const alpha = Math.pow(1 - t, 1.5) * 0.55;
     x.strokeStyle = `rgba(180,240,255,${alpha.toFixed(3)})`;
-    x.lineWidth = 16 * (1 - 0.4 * t);
+    x.lineWidth = 8 * (1 - 0.3 * t);
     x.lineCap = 'round';
     x.beginPath();
-    x.arc(0, 0, r, a, a + (a1 - a0) / steps * 1.6);
+    x.arc(0, 0, r, a, a + (a1 - a0) / steps * 1.5);
     x.stroke();
   }
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   tex.needsUpdate = true;
   return tex;
+}
+
+/* ------------------------- Tang-dao swing keyframes ------------------------ */
+// Pose = [posX, posY, posZ, rotX, rotY, rotZ] in camera space.
+const DAO_IDLE = [0.46, -0.40, -0.52, 0.22, 1.05, -0.32];
+const DAO_WIND = [
+  [0.55, -0.18, -0.50, 0.05, -1.30, -0.10], // 0 horizontal: cocked to the right
+  [0.14, 0.36, -0.44, 1.45, 0.05, 0.08],    // 1 chop: raised overhead
+  [-0.34, -0.46, -0.48, -0.60, 1.10, -0.15], // 2 rising: low-left
+];
+const DAO_END = [
+  [-0.46, -0.36, -0.46, 0.20, 1.35, 0.12],  // 0 horizontal: swept left
+  [0.06, -0.24, -0.52, -0.35, 0.02, 0.06],  // 1 chop: down-forward
+  [0.50, -0.14, -0.44, 0.75, -1.05, 0.12],  // 2 rising: high-right
+];
+function lerpPose(a, b, t) {
+  return [
+    a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t,
+    a[3] + (b[3] - a[3]) * t, a[4] + (b[4] - a[4]) * t, a[5] + (b[5] - a[5]) * t,
+  ];
 }

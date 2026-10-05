@@ -375,6 +375,20 @@ export class AudioEngine {
     });
   }
 
+  /** Bright metallic "ding" when the dao bats a bullet out of the air. */
+  swordDeflect(step = 0, chance = 1) {
+    const t0 = this.ctx.currentTime;
+    const freqs = [1500, 1900, 2350, 2900, 3500, 4300];
+    const f = freqs[((step % freqs.length) + freqs.length) % freqs.length];
+    const g = this._out(this.sfxBus, 0.5 + 0.2 * chance);
+    this._env(g, t0, 0.001, 0.01, 1, 0.2, 0.20, 0.18);
+    this._osc('triangle', f, t0, 0.22, g, { glideTo: f * 0.84 });
+    this._osc('triangle', f * 1.5, t0, 0.16, g, { glideTo: f * 0.95 });
+    const tick = this._out(this.sfxBus, 0.4);
+    this._env(tick, t0, 0.001, 0.005, 1, 0.1, 0.045, 0.035);
+    this._noiseSrc(this.noise, t0, 0.05).connect(this._filter('highpass', 5000, 1).connect(tick));
+  }
+
   explosion(scale = 1) {
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.9 * scale);
