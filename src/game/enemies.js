@@ -300,6 +300,7 @@ export class Enemy {
     this.stagger = 0;
     this.strafeDir = Math.random() < 0.5 ? 1 : -1;
     this.deadTime = 0;
+    this.gibbed = false;
     this.deathSpin = new THREE.Vector3((Math.random() - 0.5), Math.random(), (Math.random() - 0.5)).multiplyScalar(4);
     this.alertLevel = 0;
     this.investigate = null;
@@ -404,7 +405,8 @@ export class Enemy {
         this.state = 'dead';
         this.deathTime = 0;
         if (ctx && ctx.manager) {
-          ctx.effects.burst(this.center, new THREE.Vector3(0, 1, 0), 'explosion', 22, 1.1);
+          this.gibbed = true;
+          ctx.manager._killEffect(this, new THREE.Vector3(0, 1, 0));
           ctx.manager._onDotKill(this, ctx);
         }
         return;
@@ -899,6 +901,12 @@ export class Enemy {
   _updateDead(dt) {
     this.deadTime += dt;
     if (this.parts && this.parts.marker) this.parts.marker.visible = false;
+    // Violent deaths shatter: the model is gone, only the debris flies.
+    if (this.gibbed) {
+      this.root.visible = false;
+      if (this.deadTime > 0.5) this.removeMe = true;
+      return;
+    }
     // fall over + sink
     const t = Math.min(1, this.deadTime * 2.5);
     this.root.rotation.x = t * Math.PI / 2 * 0.9;
@@ -1319,8 +1327,8 @@ export class EnemyManager {
     // alert squad / nearby on damage
     if (enemy.squad) enemy.squad.reportContact(point, this.time);
     if (killed) {
-      this.effects.burst(enemy.center, new THREE.Vector3(0, 1, 0), 'explosion', 30, 1.4);
-      this.effects.shockRing(enemy.center, 0xffaa44, 0.4, 14);
+      enemy.gibbed = true;
+      this._killEffect(enemy, dir);
       if (this.audio) this.audio.enemyDeath(enemy.type.flying ? 'drone' : 'grunt');
       if (this.audio) this.audio.killConfirm();
       if (this.net && this.net.isHost) this.net.sendKill(enemy.typeKey || enemy.type.name, this.net.name, head);
@@ -1328,6 +1336,23 @@ export class EnemyManager {
     } else {
       if (this.audio) this.audio.impact('flesh', 0);
     }
+  }
+
+  /** Big "shatter" burst for a kill: debris + particles + ring + flash. */
+  _killEffect(enemy, dir) {
+    const flying = !!enemy.type.flying;
+    const stationary = !!enemy.type.stationary;
+    const blood = !flying && !stationary;
+    const scale = enemy.type.scale || 1;
+    const d = dir ? dir.clone().normalize() : new THREE.Vector3(0, 1, 0);
+    // bias a little upward so debris arcs
+    d.y += 0.35;
+    this.effects.gib(enemy.center, d, {
+      accent: enemy.type.accent, blood, scale,
+      chunks: blood ? 16 : 14,
+    });
+    // extra heavy boom for the big elites
+    if (enemy.elite) this.effects.explosion(enemy.center, 1.1);
   }
 
   onSight(enemy, pos, ctx) {

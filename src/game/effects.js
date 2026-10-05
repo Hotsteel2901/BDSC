@@ -111,6 +111,63 @@ export class Effects {
       this.flashes.push({ light: l, life: 0, max: 1, intensity: 1 });
     }
     this.flashNext = 0;
+
+    // gib chunks — solid debris flung on a violent kill (reads strongly in ASCII)
+    this.maxChunks = 96;
+    this.chunks = [];
+    const chunkGeo = new THREE.BoxGeometry(1, 1, 1);
+    for (let i = 0; i < this.maxChunks; i++) {
+      const mat = new THREE.MeshStandardMaterial({ color: 0x888888, emissive: 0x000000, emissiveIntensity: 1.2, metalness: 0.5, roughness: 0.5, transparent: true, opacity: 1 });
+      const mesh = new THREE.Mesh(chunkGeo, mat);
+      mesh.visible = false;
+      mesh.frustumCulled = false;
+      scene.add(mesh);
+      this.chunks.push({ mesh, mat, life: 0, max: 1, vel: new THREE.Vector3(), spin: new THREE.Vector3(), grav: -20, size: 0.12 });
+    }
+    this.chunkNext = 0;
+  }
+
+  /**
+   * Violent death burst: flings solid debris chunks plus a particle explosion,
+   * shock ring and flash. `dir` biases the spray (e.g. the shot/knife direction).
+   */
+  gib(point, dir, opts = {}) {
+    const accent = new THREE.Color(opts.accent != null ? opts.accent : 0xff5533);
+    const blood = !!opts.blood;
+    const scale = opts.scale || 1;
+    const n = opts.chunks || (blood ? 16 : 14);
+    const d = dir || new THREE.Vector3(0, 1, 0);
+    for (let i = 0; i < n; i++) {
+      const c = this.chunks[this.chunkNext];
+      this.chunkNext = (this.chunkNext + 1) % this.maxChunks;
+      c.mesh.visible = true;
+      c.mesh.position.copy(point).add(new THREE.Vector3((Math.random() - 0.5) * 0.5, (Math.random() - 0.5) * 0.9, (Math.random() - 0.5) * 0.5));
+      c.mesh.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+      c.size = (0.055 + Math.random() * 0.14) * scale;
+      c.mesh.scale.setScalar(c.size);
+      const sp = (2.5 + Math.random() * 5.5) * scale;
+      c.vel.set(
+        d.x * sp * (0.35 + Math.random()) + (Math.random() - 0.5) * sp * 1.5,
+        d.y * sp * 0.8 + Math.random() * sp * 1.1,
+        d.z * sp * (0.35 + Math.random()) + (Math.random() - 0.5) * sp * 1.5
+      );
+      c.spin.set((Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16, (Math.random() - 0.5) * 16);
+      c.grav = -20;
+      c.life = c.max = 0.8 + Math.random() * 0.7;
+      if (blood) {
+        c.mat.color.setRGB(0.42 + Math.random() * 0.25, 0.05, 0.07);
+        c.mat.emissive.setRGB(0.16, 0.0, 0.0);
+        c.mat.emissiveIntensity = 0.5;
+      } else {
+        c.mat.color.setRGB(accent.r * 0.5 + 0.1, accent.g * 0.5 + 0.1, accent.b * 0.5 + 0.1);
+        c.mat.emissive.copy(accent);
+        c.mat.emissiveIntensity = 1.3;
+      }
+      c.mat.opacity = 1;
+    }
+    this.burst(point, d, blood ? 'blood' : 'explosion', Math.round(26 * scale), 1.1 * scale, false);
+    this.shockRing(point, blood ? 0xff4466 : 0x66ddff, 0.45, 22 * scale);
+    this.flash(point, blood ? 0xff5577 : 0xffcc66, 5 * scale, 0.22);
   }
 
   spawnParticle(x, y, z, vx, vy, vz, r, g, b, size, life, gravity = -9, drag = 1.5) {
@@ -127,7 +184,7 @@ export class Effects {
     this.grav[i] = gravity; this.drag[i] = drag;
   }
 
-  burst(point, normal, kind = 'concrete', count = 14, power = 1) {
+  burst(point, normal, kind = 'concrete', count = 14, power = 1, dust = true) {
     const dir = normal || new THREE.Vector3(0, 1, 0);
     const palettes = {
       concrete: [0.7, 0.7, 0.68],
@@ -159,7 +216,7 @@ export class Effects {
       );
     }
     // dust puff
-    for (let i = 0; i < count * 0.4; i++) {
+    if (dust) for (let i = 0; i < count * 0.4; i++) {
       this.spawnParticle(point.x, point.y, point.z,
         (Math.random() - 0.5) * 1.5, Math.random() * 1.5, (Math.random() - 0.5) * 1.5,
         0.35, 0.35, 0.36, 0.2 + Math.random() * 0.2, 0.6 + Math.random() * 0.6, 0.2, 0.6);
@@ -316,6 +373,21 @@ export class Effects {
         f.light.intensity = f.intensity * t * t;
         if (f.life <= 0) f.light.visible = false;
       }
+    }
+
+    // gib chunks
+    for (const c of this.chunks) {
+      if (c.life <= 0) continue;
+      c.life -= dt;
+      if (c.life <= 0) { c.mesh.visible = false; continue; }
+      c.vel.y += c.grav * dt;
+      c.mesh.position.addScaledVector(c.vel, dt);
+      c.mesh.rotation.x += c.spin.x * dt;
+      c.mesh.rotation.y += c.spin.y * dt;
+      c.mesh.rotation.z += c.spin.z * dt;
+      const t = c.life / c.max;
+      c.mat.opacity = Math.min(1, t * 2.2);
+      c.mesh.scale.setScalar(c.size * (0.45 + 0.55 * t));
     }
   }
 }

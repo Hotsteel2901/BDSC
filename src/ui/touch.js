@@ -65,7 +65,7 @@ export class TouchControls {
     this.root.appendChild(el);
     this.el = el;
 
-    // Weapon strip (tap to select 1..7).
+    // Weapon strip (tap to select 1..8).
     const strip = el.querySelector('#touch-weapons');
     strip.innerHTML = this.game.weaponSystem.weapons.map((w, i) =>
       `<div class="tweap" data-digit="Digit${i + 1}"><b>${i + 1}</b><span>${w.base.name.slice(0, 3)}</span></div>`

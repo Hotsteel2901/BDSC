@@ -54,7 +54,7 @@ npm run test:collision # collision regression (no wall/corner teleports)
 | Sprint | `Shift` |
 | Crouch | `Ctrl` or `C` |
 | Jump | `Space` |
-| Weapon | `1 2 3 4 5 6 7` (or mouse wheel) |
+| Weapon | `1 2 3 4 5 6 7 8` (or mouse wheel) |
 | Reload | `R` |
 | Throw grenade | `G` |
 | Quick-use hotbar | `Z X C V B N M` |
@@ -63,7 +63,8 @@ npm run test:collision # collision regression (no wall/corner teleports)
 | Arsenal / upgrades | Pause (`Esc`) → ARSENAL |
 
 Weapons: VECTOR-9 pistol, WASP SMG, PULSE AR, BREACH-12 shotgun, LANCE DMR sniper,
-ION CASTER plasma, HOUND RL rocket launcher.
+ION CASTER plasma, HOUND RL rocket launcher, and the TANG DAO melee saber (hold fire
+to chain a three-swing combo; kills burst into flying debris).
 
 ### Mobile / touch
 
@@ -72,7 +73,7 @@ Phones and tablets automatically get a full touch layout (force it on desktop wi
 
 - **Left dynamic joystick** — move; analogue speed, push to the edge to auto-sprint.
 - **Right side drag** — look; a dynamic stick appears where you touch.
-- **Weapon strip** (top centre) — tap 1–7 to switch weapons.
+- **Weapon strip** (top centre) — tap 1–8 to switch weapons.
 - **Quickbar** (bottom centre) — tap a slot to use that item (Z X C V B N M).
 - **Right thumb cluster** — FIRE, JUMP, RELOAD, ADS (toggle), CROUCH (toggle),
   GRENADE and HEAL; **PAUSE** and **BAG** sit top-right.
@@ -101,7 +102,7 @@ Every listed system is implemented and exercised end-to-end and verified by the 
 smoke tests (world streaming, collision, weapons, projectiles, enemy AI, networking,
 audio scheduling). There are no `TODO`/placeholder code paths.
 
-**3 — Go for it.** Persistent huge city, 7 weapons, 7 enemy archetypes, 6 music tracks,
+**3 — Go for it.** Persistent huge city, 8 weapons, 7 enemy archetypes, 6 music tracks,
 squads, grenades, interiors, minimap — all on.
 
 **4 — Dependencies handled.** Pure `npm` + Vite. Only runtime deps are `three`, `mqtt`.

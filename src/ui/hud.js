@@ -267,11 +267,16 @@ export class HUD {
     const ad = ammoDef(w.weapon.ammoType || 'standard');
     const ammo = ad.name;
     const ammoCol = ad.color != null ? hex(ad.color) : 'var(--fg)';
+    const isMelee = !!def.melee;
+    const ammoLine = isMelee ? '∞' : (w.reloading ? t('hud.reload') : wstate.ammo + ' / ' + wstate.reserve);
+    const typeLine = isMelee
+      ? `<div style="color:var(--accent2)">${t('hud.melee')}</div>`
+      : `<div style="color:${ammoCol}">◈ ${ammo}</div>`;
     this._set('hud-tr',
       `<div style="font-size:15px;color:var(--accent)">${def.name}</div>
        <div style="opacity:.8">${w.baseDef.cat} · ${t('hud.level', { lv: def.level || 1 })}</div>
-       <div style="margin-top:4px;font-size:20px">${w.reloading ? t('hud.reload') : wstate.ammo + ' / ' + wstate.reserve}</div>
-       <div style="color:${ammoCol}">◈ ${ammo}</div>
+       <div style="margin-top:4px;font-size:20px">${ammoLine}</div>
+       ${typeLine}
        <div style="opacity:.7">FPS ${game.fps}</div>`
     );
     this._set('hud-bl',

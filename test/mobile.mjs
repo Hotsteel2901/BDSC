@@ -158,7 +158,7 @@ try {
   }, { helpers: HELPERS });
   check(reload, 'reload button starts a reload');
 
-  // ---- weapon strip (all 7) ----
+  // ---- weapon strip (all 8) ----
   const weapons = await page.evaluate(async ({ helpers }) => {
     const f = eval(helpers);
     const frames = (n) => new Promise(res => { let i = 0; const tick = () => { if (++i >= n) res(); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
@@ -169,10 +169,14 @@ try {
     const idx1 = g.weaponSystem.index;
     f(strip[4], 'pointerdown', 400, 20);
     await frames(14);
-    return { idx1, idx4: g.weaponSystem.index, buttons: strip.length };
+    const idx5 = g.weaponSystem.index;
+    f(strip[7], 'pointerdown', 500, 20);
+    await frames(14);
+    return { idx1, idx4: idx5, idx8: g.weaponSystem.index, melee: !!g.weaponSystem.def.melee, buttons: strip.length };
   }, { helpers: HELPERS });
-  check(weapons.buttons === 7, 'all 7 weapons on the touch strip');
+  check(weapons.buttons === 8, 'all 8 weapons on the touch strip');
   check(weapons.idx1 === 0 && weapons.idx4 === 4, `weapon strip selects (1 -> ${weapons.idx1}, 5 -> ${weapons.idx4})`);
+  check(weapons.idx8 === 7 && weapons.melee, `weapon strip selects the melee dao (8 -> ${weapons.idx8})`);
 
   // ---- quickbar slot ----
   const quick = await page.evaluate(async ({ helpers }) => {

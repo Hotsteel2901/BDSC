@@ -307,6 +307,74 @@ export class AudioEngine {
     }
   }
 
+  // ---- melee (sword) ---------------------------------------------------
+  swordSwing(variant = 0) {
+    const t0 = this.ctx.currentTime;
+    // whoosh: bandpassed noise sweeping up then down (the blade slicing air)
+    const g = this._out(this.sfxBus, 0.55);
+    this._env(g, t0, 0.015, 0.05, 1, 0.4, 0.14, 0.12);
+    const base = variant === 1 ? 700 : variant === 2 ? 1100 : 900;
+    const bp = this._filter('bandpass', base, 5);
+    bp.frequency.setValueAtTime(base * 0.5, t0);
+    bp.frequency.exponentialRampToValueAtTime(base * 3.2, t0 + 0.11);
+    bp.frequency.exponentialRampToValueAtTime(base * 0.6, t0 + 0.30);
+    this._noiseSrc(this.noise, t0, 0.34, 1.25).connect(bp);
+    bp.connect(g);
+    // metallic edge shimmer
+    const g2 = this._out(this.sfxBus, 0.14);
+    this._env(g2, t0 + 0.03, 0.005, 0.02, 0.8, 0.2, 0.16, 0.14);
+    this._osc('triangle', 2200 + variant * 300, t0 + 0.03, 0.18, g2, { glideTo: 900 + variant * 200 });
+  }
+
+  /** Blade biting flesh/armour — the satisfying "chop" transient. */
+  swordHit(kind = 'flesh', power = 1) {
+    const t0 = this.ctx.currentTime;
+    // sharp attack transient
+    const click = this._out(this.sfxBus, 0.5 * power);
+    this._env(click, t0, 0.001, 0.006, 1, 0.2, 0.05, 0.04);
+    this._noiseSrc(this.noise, t0, 0.06).connect(this._filter('highpass', 3500, 1).connect(click));
+    if (kind === 'head') {
+      const g = this._out(this.sfxBus, 0.7);
+      this._env(g, t0, 0.001, 0.02, 1, 0.2, 0.18, 0.16);
+      this._osc('square', 1500, t0, 0.14, g, { glideTo: 480 });
+      this._noiseSrc(this.noise, t0, 0.14).connect(this._filter('bandpass', 2600, 3).connect(g));
+    }
+    // wet body + crunch
+    const body = this._out(this.sfxBus, 0.6 * power);
+    this._env(body, t0, 0.001, 0.015, 1, 0.25, 0.16, 0.14);
+    this._osc('sawtooth', 250, t0, 0.16, body, { glideTo: 85 });
+    this._noiseSrc(this.noisePink, t0, 0.2).connect(this._filter('lowpass', 1200, 1).connect(body));
+    // metallic ring (blade resonance)
+    const ring = this._out(this.sfxBus, 0.22 * power);
+    this._env(ring, t0, 0.001, 0.01, 0.8, 0.15, 0.22, 0.2);
+    this._osc('triangle', 3200, t0, 0.24, ring, { glideTo: 1600 });
+    this._osc('triangle', 4780, t0, 0.22, ring, { glideTo: 2400 });
+  }
+
+  /** Air swing that connects with nothing. */
+  swordMiss() {
+    const t0 = this.ctx.currentTime;
+    const g = this._out(this.sfxBus, 0.2);
+    this._env(g, t0, 0.01, 0.03, 1, 0.3, 0.10, 0.09);
+    this._noiseSrc(this.noise, t0, 0.14, 1.4).connect(this._filter('bandpass', 2200, 4).connect(g));
+  }
+
+  /** Big finishing sting for a melee kill. */
+  swordKill() {
+    const t0 = this.ctx.currentTime;
+    const g = this._out(this.sfxBus, 0.8);
+    this._env(g, t0, 0.002, 0.05, 1, 0.25, 0.5, 0.45);
+    this._osc('sine', 150, t0, 0.5, g, { glideTo: 40 });
+    const g2 = this._out(this.sfxBus, 0.32);
+    this._env(g2, t0, 0.001, 0.02, 1, 0.2, 0.3, 0.28);
+    this._noiseSrc(this.noise, t0, 0.3).connect(this._filter('lowpass', 1600, 2).connect(g2));
+    [1180, 1760, 2640].forEach((f, i) => {
+      const gg = this._out(this.sfxBus, 0.18);
+      this._env(gg, t0 + i * 0.04, 0.001, 0.01, 0.8, 0.2, 0.12, 0.11);
+      this._osc('triangle', f, t0 + i * 0.04, 0.16, gg, { glideTo: f * 0.6 });
+    });
+  }
+
   explosion(scale = 1) {
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.9 * scale);

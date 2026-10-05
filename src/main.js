@@ -104,6 +104,9 @@ class Game {
       this.progression.addScrap(Math.round((enemy.type.xp || 10) * 1.6));
       if (this.spawner) this.spawner.onKill();
       if (this.loot) this.loot.dropAt(enemy.pos, enemy.typeKey || 'grunt', enemy.elite);
+      // weight & feedback: a kill kicks the camera; melee kills get a sting
+      this.player.viewShake = Math.min(1.2, this.player.viewShake + 0.22);
+      if (this.weaponSystem.def.melee && this.audio.swordKill) this.audio.swordKill();
       this.hud.killFeed(`<span style="color:var(--accent)">${t('hud.you')}</span> ▸ ${enemyName(enemy.typeKey || enemy.type.name)}${head ? ' ⌖' : ''}`);
     };
     this.loot.onPickup = (def, got) => {

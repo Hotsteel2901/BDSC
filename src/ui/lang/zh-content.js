@@ -125,12 +125,13 @@ export const ZH_CONTENT = {
   /* ------------------------------------ weapons -------------------------- */
   weapon: {
     pistol: { cat: '副武器' },
-    smg: { cat: '近战' },
+    smg: { cat: '冲锋' },
     rifle: { cat: '突击' },
     shotgun: { cat: '破门' },
     sniper: { cat: '精准' },
     plasma: { cat: '能量' },
     launcher: { cat: '重型' },
+    dao: { cat: '近战' },
   },
 
   /* ------------------------------------ upgrade tree --------------------- */

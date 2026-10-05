@@ -9,6 +9,9 @@ export const WEAPONS = [
   { id: 'sniper', name: 'LANCE DMR', cat: 'PRECISION', dmg: 108, rpm: 48, mode: 'semi', mag: 5, reserve: 35, spread: 0.0012, moveSpread: 0.06, recoilP: 3.4, recoilY: 0.5, reload: 2.9, pellets: 1, range: 700, scope: 3.4, color: 0xddeeff, tracer: [0.8, 0.95, 1.0] },
   { id: 'plasma', name: 'ION CASTER', cat: 'ENERGY', dmg: 44, rpm: 190, mode: 'auto', mag: 20, reserve: 160, spread: 0.009, moveSpread: 0.02, recoilP: 0.85, recoilY: 0.35, reload: 2.2, projectile: 'plasma', range: 300, color: 0x66ddff, tracer: [0.4, 0.9, 1.0] },
   { id: 'launcher', name: 'HOUND RL', cat: 'HEAVY', dmg: 90, rpm: 58, mode: 'semi', mag: 4, reserve: 20, spread: 0.006, moveSpread: 0.03, recoilP: 3.6, recoilY: 0.9, reload: 3.2, projectile: 'rocket', range: 400, color: 0xff8844, tracer: [1, 0.6, 0.2] },
+  // Melee: a Tang dao (Chinese saber). No ammo/reload; swings with a light
+  // 3-hit combo, each variant with its own arc, trail and impact timing.
+  { id: 'dao', name: 'TANG DAO', cat: 'MELEE', dmg: 88, rpm: 168, mode: 'melee', melee: true, reach: 3.0, arc: 1.5, mag: 0, reserve: 0, reload: 0, spread: 0, moveSpread: 0, recoilP: 0.9, recoilY: 0.4, range: 3.0, color: 0xbfe9ff, tracer: [0.72, 0.95, 1.0] },
 ];
 
 /**
@@ -31,6 +34,9 @@ export class WeaponSystem {
     this.viewRoot.add(this.viewLightWarm);
     this.muzzleFlash = this._makeFlash();
     this.viewRoot.add(this.muzzleFlash.root);
+    // Melee slash trail (camera space; a fading crescent that sweeps with the swing).
+    this.slash = this._makeSlash();
+    this.viewRoot.add(this.slash.root);
 
     this.progression = ctx.progression || null;
     this.buffs = ctx.buffs || null;
@@ -66,6 +72,10 @@ export class WeaponSystem {
     this._lastShotAt = -9;
     this._vmBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
     this._vmAdsPos = new THREE.Vector3(0, -0.16, -0.42);
+    // Melee combo / swing state
+    this._melee = null;      // { t, dur, variant, hitAt, hit, freeze, hitCount }
+    this._combo = 0;         // advances per swing, wraps 0..2
+    this._comboTimer = 0;    // resets the combo when idle
     this.lastShotTime = 0;
     this.onKillCallback = null;
     this.buildModels();
@@ -169,6 +179,20 @@ export class WeaponSystem {
         g.add(this._box(0.05, 0.05, 0.1, 0, 0.14, -0.3, D));
         break;
       }
+      case 'dao': {
+        // A Tang dao: pommel, wrapped grip, disc guard, a long single-edged
+        // blade with a bright emissive edge (reads as a line in ASCII).
+        const bladeMat = new THREE.MeshStandardMaterial({ color: 0xdfe9f2, metalness: 0.95, roughness: 0.18, emissive: 0x2a3a44, emissiveIntensity: 0.6 });
+        const edgeMat = new THREE.MeshStandardMaterial({ color: 0x9ff0ff, emissive: 0x8ff0ff, emissiveIntensity: 2.0, roughness: 0.25, toneMapped: false });
+        g.add(this._box(0.07, 0.07, 0.30, 0, 0, 0.17, D));            // grip
+        g.add(this._box(0.09, 0.09, 0.05, 0, 0, 0.335, accent));        // pommel
+        g.add(this._box(0.24, 0.035, 0.055, 0, 0, 0.005, accent));      // disc guard
+        // blade: width on X, thin on Y, long on -Z, with a slight back-sweep
+        g.add(this._box(0.055, 0.022, 1.18, 0, 0.004, -0.62, bladeMat));
+        g.add(this._box(0.014, 0.028, 1.16, 0.021, 0.004, -0.62, edgeMat)); // sharp edge highlight
+        g.add(this._box(0.05, 0.02, 0.22, 0.012, 0.006, -1.24, bladeMat));  // upswept tip
+        break;
+      }
       default: {
         g.add(this._box(0.1, 0.12, 0.5, 0, 0, -0.2, B));
       }
@@ -191,6 +215,21 @@ export class WeaponSystem {
     root.add(light);
     root.visible = false;
     return { root, quad, light, mat, life: 0 };
+  }
+
+  _makeSlash() {
+    const tex = makeSlashTexture();
+    const mat = new THREE.MeshBasicMaterial({
+      map: tex, color: 0x63d0ff, transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false,
+      side: THREE.DoubleSide, toneMapped: false,
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(2.1, 2.1), mat);
+    mesh.position.set(0, -0.05, -0.98);
+    mesh.visible = false;
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 20;
+    return { root: mesh, mat, life: 0, max: 1, variant: 0 };
   }
 
   buildModels() {
@@ -264,6 +303,8 @@ export class WeaponSystem {
     this.reloading = false;
     this.reloadT = 0;
     this.switching = 0.45;
+    this._melee = null;
+    if (this.slash) { this.slash.root.visible = false; this.slash.mat.opacity = 0; }
     this._selectVisual(i);
     if (this.ctx.audio) this.ctx.audio.reload(1);
   }
@@ -323,8 +364,8 @@ export class WeaponSystem {
 
     if (active) {
       // weapon selection
-      const digits = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7'];
-      for (let i = 0; i < digits.length; i++) if (input.pressed(digits[i])) this.switchTo(i);
+      const digits = ['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5', 'Digit6', 'Digit7', 'Digit8'];
+      for (let i = 0; i < digits.length && i < this.weapons.length; i++) if (input.pressed(digits[i])) this.switchTo(i);
       const wheel = input.takeWheel();
       if (wheel) {
         let ni = (this.index + (wheel > 0 ? 1 : -1) + this.weapons.length) % this.weapons.length;
@@ -334,23 +375,34 @@ export class WeaponSystem {
 
       // fire
       const w = this.weapon;
-      const semi = w.stats.mode === 'semi' || w.stats.mode === 'pump';
-      const wantFire = semi ? input.mousePressed(0) : input.mouseDown(0);
-      // ADS
-      this.adsTarget = input.mouseDown(2) ? 1 : 0;
-      this.ads += (this.adsTarget - this.ads) * Math.min(1, dt * 10);
-      if (this.switching <= 0 && !this.reloading && wantFire && this.cooldown <= 0) {
-        if (w.ammo > 0) this._fire();
-        else {
-          if (this.ctx.audio) this.ctx.audio.dryFire();
-          this.cooldown = 0.3;
-          this.reload();
+      const adsHeld = input.mouseDown(2);
+      if (w.stats.melee) {
+        // melee: hold LMB to chain swings; RMB is a subtle guard (no zoom)
+        this.adsTarget = adsHeld ? 0.35 : 0;
+        this.ads += (this.adsTarget - this.ads) * Math.min(1, dt * 10);
+        if (this.switching <= 0 && this.cooldown <= 0 && input.mouseDown(0)) this._swing();
+      } else {
+        const semi = w.stats.mode === 'semi' || w.stats.mode === 'pump';
+        const wantFire = semi ? input.mousePressed(0) : input.mouseDown(0);
+        // ADS
+        this.adsTarget = adsHeld ? 1 : 0;
+        this.ads += (this.adsTarget - this.ads) * Math.min(1, dt * 10);
+        if (this.switching <= 0 && !this.reloading && wantFire && this.cooldown <= 0) {
+          if (w.ammo > 0) this._fire();
+          else {
+            if (this.ctx.audio) this.ctx.audio.dryFire();
+            this.cooldown = 0.3;
+            this.reload();
+          }
         }
       }
     } else {
       this.adsTarget = 0;
       this.ads += (0 - this.ads) * Math.min(1, dt * 8);
     }
+
+    // melee swing timeline (advances even while paused just to settle)
+    this._tickMelee(dt);
 
     // spread bloom decay
     this.spreadBloom = Math.max(0, this.spreadBloom - dt * 3.2);
@@ -401,20 +453,166 @@ export class WeaponSystem {
     // switch drop
     if (this.switching > 0) reloadDrop += (this.switching / 0.45) * 0.4;
 
-    m.position.set(
-      base.x + swayX + bobX - this.recoilKick.x,
-      base.y + swayY + bobY - reloadDrop - this.recoilKick.y,
-      base.z + this.recoilKick.z
-    );
-    m.rotation.set(
-      reloadRot + this.recoilRot.x - swayY * 2,
-      this.recoilRot.y - swayX * 3,
-      this.recoilRot.y * 1.5 + (this.adsTarget ? 0 : 0.02)
-    );
+    if (this.def.melee) {
+      this._poseMelee(m, dt, swayX, swayY, bob, reloadDrop);
+    } else {
+      m.position.set(
+        base.x + swayX + bobX - this.recoilKick.x,
+        base.y + swayY + bobY - reloadDrop - this.recoilKick.y,
+        base.z + this.recoilKick.z
+      );
+      m.rotation.set(
+        reloadRot + this.recoilRot.x - swayY * 2,
+        this.recoilRot.y - swayX * 3,
+        this.recoilRot.y * 1.5 + (this.adsTarget ? 0 : 0.02)
+      );
+    }
 
     // While looking through a scope, hide the viewmodel: its solid optic body
     // would otherwise fill the lens. The HUD scope overlay takes over.
     m.visible = !(this.scoped && this.ads > 0.5);
+
+    // Slash trail sweep/fade.
+    this._animateSlash(dt);
+  }
+
+  /** Procedural Tang-dao poses: three distinct swings (horizontal / chop / rising). */
+  _poseMelee(m, dt, swayX, swayY, bob, drop) {
+    const swing = this._melee;
+    const bobX = Math.sin(this.time * 9) * 0.014 * bob;
+    const bobY = Math.abs(Math.cos(this.time * 9)) * 0.012 * bob;
+    if (!swing) {
+      // resting guard
+      m.position.set(0.34 + swayX + bobX, -0.34 + swayY + bobY - drop, -0.56);
+      m.rotation.set(-0.22 - swayY * 2, -0.38 - swayX * 3, -0.5);
+      return;
+    }
+    const p = THREE.MathUtils.clamp(swing.t / swing.dur, 0, 1);
+    const easeOut = (x) => 1 - (1 - x) * (1 - x);
+    let k;
+    if (p < 0.22) k = (p / 0.22) * 0.12;                       // wind-up
+    else if (p < 0.62) k = 0.12 + easeOut((p - 0.22) / 0.40) * 0.78; // strike
+    else k = 0.90 + ((p - 0.62) / 0.38) * 0.10;                // recover
+    const lunge = Math.sin(Math.PI * k) * 0.10;
+    const v = swing.variant;
+    let px, py, pz, rx, ry, rz;
+    if (v === 0) {            // horizontal right→left
+      px = 0.56 + (-0.30 - 0.56) * k; py = -0.30 + Math.sin(Math.PI * k) * 0.03; pz = -0.48;
+      rx = -0.14; ry = -0.95 + 1.80 * k; rz = -0.36 + 0.62 * k;
+    } else if (v === 1) {     // overhead chop
+      px = 0.04; py = 0.30 + (-0.54 - 0.30) * k; pz = -0.42 - 0.18 * k;
+      rx = -1.15 + 2.00 * k; ry = 0.10; rz = 0.10;
+    } else {                  // rising diagonal left→right
+      px = -0.32 + 0.82 * k; py = -0.52 + 0.38 * k; pz = -0.50;
+      rx = 0.35 - 0.70 * k; ry = 0.90 - 1.60 * k; rz = 0.35 - 0.65 * k;
+    }
+    m.position.set(px + swayX - this.recoilKick.x, py + swayY - drop - this.recoilKick.y, pz + this.recoilKick.z - lunge);
+    m.rotation.set(rx + this.recoilRot.x, ry + this.recoilRot.y - swayX * 1.5, rz + swayY * 1.5);
+  }
+
+  _animateSlash(dt) {
+    const s = this.slash;
+    if (!s || s.life <= 0) return;
+    const t = 1 - s.life / s.max;          // 0..1
+    const v = s.variant;
+    const rot0 = v === 0 ? -0.55 : v === 1 ? 1.30 : -1.15;
+    const sweep = v === 0 ? 2.10 : v === 1 ? -1.90 : 1.95;
+    s.root.rotation.z = rot0 + sweep * THREE.MathUtils.smoothstep(t, 0, 1);
+    const env = Math.sin(Math.PI * Math.min(1, t * 1.05));
+    s.mat.opacity = env * 0.5;
+    s.root.scale.setScalar(0.74 + 0.16 * t);
+  }
+
+  /** Begin one melee swing (combo index cycles the three variants). */
+  _swing() {
+    const def = this.def;
+    const dur = 60 / Math.max(40, def.rpm);
+    const variant = this._combo % 3;
+    this._combo = (this._combo + 1) % 3;
+    this._comboTimer = 0.55;
+    this._melee = { t: 0, dur, variant, hitAt: dur * 0.35, hit: false, freeze: 0, hits: 0 };
+    this.cooldown = dur * 0.84;
+    const a = this.ctx.audio;
+    if (a && a.swordSwing) a.swordSwing(variant);
+    // slash trail
+    this.slash.life = this.slash.max = dur * 1.0;
+    this.slash.variant = variant;
+    this.slash.root.visible = true;
+    this.slash.mat.opacity = 0;
+    if (this.ctx.player) this.ctx.player.addRecoil(0.003, 0);
+  }
+
+  _tickMelee(dt) {
+    if (this._comboTimer > 0) {
+      this._comboTimer -= dt;
+      if (this._comboTimer <= 0 && !this._melee) this._combo = 0;
+    }
+    const m = this._melee;
+    if (m) {
+      if (m.freeze > 0) m.freeze -= dt;   // hit-stop: the blade "sticks" on impact
+      else m.t += dt;
+      if (!m.hit && m.t >= m.hitAt) { m.hit = true; this._meleeHit(m); }
+      if (m.t >= m.dur) this._melee = null;
+    }
+    if (this.slash.life > 0) {
+      this.slash.life -= dt;
+      if (this.slash.life <= 0) { this.slash.root.visible = false; this.slash.mat.opacity = 0; }
+    }
+  }
+
+  /** Resolve a swing's damage against every enemy inside the arc. */
+  _meleeHit(m) {
+    const ctx = this.ctx;
+    const def = this.def;
+    const player = ctx.player;
+    const look = player.getLookDir();
+    const origin = player.eyePos;
+    origin.y -= 0.25;
+    const reach = def.reach || 2.8;
+    const arcCos = Math.cos(Math.min(1.6, def.arc || 1.2));
+    const tmp = new THREE.Vector3();
+    let count = 0, anyHead = false;
+    for (const e of ctx.enemies.list) {
+      if (!e.alive || e.ghost) continue;
+      const c = e.center;
+      const dx = c.x - origin.x, dy = c.y - origin.y, dz = c.z - origin.z;
+      const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      if (dist > reach + e.type.radius) continue;
+      const inv = 1 / Math.max(0.001, dist);
+      const nx = dx * inv, ny = dy * inv, nz = dz * inv;
+      if (nx * look.x + ny * look.y + nz * look.z < arcCos) continue;
+      const wHit = ctx.world.raycast(origin, tmp.set(nx, ny, nz), dist, (b) => b.tag === 'sidewalk');
+      if (wHit && wHit.distance < dist - 0.35) continue;
+      const head = dy > 0.5 && (nx * look.x + ny * look.y + nz * look.z) > 0.85;
+      const falloff = 1 - Math.min(0.35, (dist / reach) * 0.35);
+      const dmg = def.dmg * falloff * (head ? (def.headshotMul || 2) : 1);
+      if (this.progression) this.progression.addXp('dao', dmg * 0.5 + (head ? 4 : 1));
+      if (ctx.stats) ctx.stats.hits++;
+      const wasAlive = e.alive;
+      ctx.enemies.damage(e, dmg, c, look, head, 'dao');
+      if (wasAlive && !e.alive && def.perks && def.perks.lifesteal) ctx.player.heal(5);
+      // knockback + stagger: the blade bites and shoves the target
+      e.vel.x += look.x * 5.5; e.vel.z += look.z * 5.5;
+      e.stagger = Math.max(e.stagger, 0.4);
+      ctx.effects.burst(c, tmp.set(-look.x, 0.2, -look.z).normalize(), 'blood', head ? 22 : 16, head ? 1.4 : 1.15);
+      ctx.effects.burst(c, tmp.set(look.x, 0.4, look.z).normalize(), 'metal', 6, 0.7);
+      if (head) anyHead = true;
+      count++;
+    }
+    m.hits = count;
+    const a = ctx.audio;
+    if (count > 0) {
+      m.freeze = 0.055 + 0.02 * Math.min(2, count);        // 砍中有阻力
+      player.viewShake = Math.min(1.0, player.viewShake + 0.16 + 0.05 * count);
+      player.addRecoil(0.010, (Math.random() - 0.5) * 0.006);
+      this.recoilKick.set((Math.random() - 0.5) * 0.03, 0.01, 0.06);
+      this.recoilRot.set(-0.08, (Math.random() - 0.5) * 0.08);
+      if (a && a.swordHit) a.swordHit(anyHead ? 'head' : 'flesh', 1 + 0.2 * count);
+      if (ctx.hud) ctx.hud.hitmark(anyHead);
+      if (a) a.duckMusic(0.22, 0.4);
+    } else {
+      if (a && a.swordMiss) a.swordMiss();
+    }
   }
 
   _fire() {
@@ -638,4 +836,35 @@ function surfaceFromTag(tag) {
     case 'roof': return 'concrete';
     default: return 'concrete';
   }
+}
+
+/**
+ * Slash-trail texture: a glowing crescent with a soft tail. Drawn on a 2D canvas
+ * and used additively on the camera-space slash plane, so the swing leaves a
+ * bright arc that reads clearly in the ASCII pass.
+ */
+function makeSlashTexture() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 256;
+  const x = c.getContext('2d');
+  x.clearRect(0, 0, 256, 256);
+  x.translate(128, 128);
+  const r = 92;
+  const a0 = -0.55, a1 = 1.05;
+  const steps = 46;
+  for (let i = 0; i < steps; i++) {
+    const t = i / (steps - 1);
+    const a = a0 + (a1 - a0) * t;
+    const alpha = Math.pow(1 - t, 1.5) * 0.7;
+    x.strokeStyle = `rgba(180,240,255,${alpha.toFixed(3)})`;
+    x.lineWidth = 16 * (1 - 0.4 * t);
+    x.lineCap = 'round';
+    x.beginPath();
+    x.arc(0, 0, r, a, a + (a1 - a0) / steps * 1.6);
+    x.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
 }
