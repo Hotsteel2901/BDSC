@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { AsciiComposer, DEFAULT_RAMP, SYMBOL_RAMP } from './engine/ascii.js';
+import { AsciiComposer, DEFAULT_RAMP, DETAIL_RAMP, SYMBOL_RAMP } from './engine/ascii.js';
 import { Input, isTouchDevice } from './engine/input.js';
 import { AudioEngine } from './engine/audio.js';
 import { DnBEngine } from './music/dnb.js';
@@ -259,7 +259,8 @@ class Game {
   }
 
   _reloadRamp() {
-    const ramp = document.getElementById('in-ramp').value === '1' ? SYMBOL_RAMP : DEFAULT_RAMP;
+    const v = document.getElementById('in-ramp').value;
+    const ramp = v === '1' ? SYMBOL_RAMP : (v === '2' ? DETAIL_RAMP : DEFAULT_RAMP);
     this.composer.setRamp(ramp);
     this.composer.setSize(window.innerWidth, window.innerHeight);
   }

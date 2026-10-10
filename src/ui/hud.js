@@ -157,8 +157,9 @@ export class HUD {
           <label class="field" style="flex:1"><span data-i18n="menu.ascii">${t('menu.ascii')}</span><input type="checkbox" id="in-ascii" checked></label>
           <label class="field" style="flex:1"><span data-i18n="menu.ramp">${t('menu.ramp')}</span>
             <select id="in-ramp">
-              <option value="0" data-i18n="menu.ramp.dense">${t('menu.ramp.dense')}</option>
+              <option value="0" data-i18n="menu.ramp.clean">${t('menu.ramp.clean')}</option>
               <option value="1" data-i18n="menu.ramp.terminal">${t('menu.ramp.terminal')}</option>
+              <option value="2" data-i18n="menu.ramp.dense">${t('menu.ramp.dense')}</option>
             </select>
           </label>
           <label class="field" style="flex:1"><span data-i18n="menu.tint">${t('menu.tint')}</span><input type="checkbox" id="in-color" checked></label>

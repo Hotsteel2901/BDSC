@@ -239,11 +239,13 @@ test/
 2. A bright-pass gives a cheap bloom.
 3. The compose shader samples each cell, applies grade (contrast/saturation/brightness),
    converts linear → sRGB, detects edges, picks a glyph from the ramp, samples the glyph
-   atlas, and tints it with the scene colour — plus scanlines, vignette, chromatic
-   aberration, film grain and a damage overlay.
+   atlas, and tints it with the scene colour. A **cell fill** term paints a fraction of the
+   cell colour into the gaps between glyph strokes so the ASCII view keeps roughly the same
+   average brightness as the raw render instead of collapsing to black — plus light
+   scanlines, vignette, chromatic aberration, film grain and a damage overlay.
 
-Tune it live from the menu: **ASCII CELL** size, **GLYPH RAMP** (dense or terminal),
-**TINT** and **EDGE GLYPHS**. Prefer plain 3D? **ASCII RENDER** switches the whole
+Tune it live from the menu: **ASCII CELL** size, **GLYPH RAMP** (CLEAN, TERMINAL or
+DENSE), **TINT** and **EDGE GLYPHS**. Prefer plain 3D? **ASCII RENDER** switches the whole
 glyph pipeline off (raw scene, no scanlines/vignette) and the choice is remembered.
 
 ### Languages

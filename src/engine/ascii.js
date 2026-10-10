@@ -9,8 +9,19 @@ import * as THREE from 'three';
  * character ramp + Sobel edge detection produce crisp, unified ASCII art.
  */
 
-// Density-ordered ramp. Index 0 = darkest, last = brightest.
+// Density-ordered ramps. Index 0 = darkest, last = brightest.
+//
+// DEFAULT (clean): kept deliberately *short*. The old 90-glyph ramp packed many
+// near-identical densities next to each other, so flat surfaces shimmered
+// between neighbouring glyphs and the whole frame turned into illegible
+// letter-soup ("eye strain"). A coarse, well-separated ramp quantises cleanly
+// and reads as structure.
 export const DEFAULT_RAMP =
+  ' .:-=+*#%@';
+
+// The original high-density ramp, still selectable for players who want the
+// fine-grained look.
+export const DETAIL_RAMP =
   ' .\'`^",:;Il!i><~+_-?][}{1)(|\\/tfjrxnuvczXYUJCLQ0OZmwqpdbkhao*#MW&8%B@$';
 
 // A second ramp that leans on symbols for a more "terminal" look.
@@ -37,8 +48,8 @@ export class AsciiComposer {
     this.resMult = opts.resMult || 4;        // internal pixels per cell (AA for small bright features)
     this.color = opts.color !== false;       // tint glyphs with scene colour
     this.edge = opts.edge !== false;         // sobel edge -> outline glyphs
-    this.contrast = opts.contrast ?? 1.18;
-    this.brightness = opts.brightness ?? 1.95;
+    this.contrast = opts.contrast ?? 1.10;
+    this.brightness = opts.brightness ?? 2.20;
     this.saturation = opts.saturation ?? 1.15;
     this.gamma = opts.gamma ?? 0.4545; // linear -> sRGB (1/2.2)
     this.densityRamp = opts.ramp || DEFAULT_RAMP;
@@ -49,15 +60,21 @@ export class AsciiComposer {
     this.bg = new THREE.Color(opts.bg || 0x03060a);
     this.enabled = opts.enabled !== false;
     this.fx = {
-      // Calmer post FX: heavy scanlines / grain / aberration all ate into
-      // glyph legibility, so they default low and can still be tuned.
-      scanline: opts.scanline ?? 0.05,
-      vignette: opts.vignette ?? 0.18,
-      bloom: opts.bloom ?? 0.32,
-      aberration: opts.aberration ?? 0.45,
-      noise: opts.noise ?? 0.022,
-      flicker: opts.flicker ?? 0.008,
+      // Very restrained post FX. Heavy scanlines / grain / aberration / vignette
+      // all ate into glyph legibility and, critically, multiplied the frame
+      // darker — they now default near-off and can still be tuned per option.
+      scanline: opts.scanline ?? 0.03,
+      vignette: opts.vignette ?? 0.07,
+      bloom: opts.bloom ?? 0.34,
+      aberration: opts.aberration ?? 0.18,
+      noise: opts.noise ?? 0.006,
+      flicker: opts.flicker ?? 0.003,
     };
+    // Fraction of the cell colour painted into the empty part of every glyph
+    // cell. ASCII glyphs only ink ~20-40% of a cell, so without this the vast
+    // majority of the frame collapses to background black and the whole image
+    // reads far darker than the raw 3D render.
+    this.fill = opts.fill ?? 0.52;
 
     this.fontTexture = makeFontAtlas(this.ramp, 32);
     this.fontCols = this.fontTexture.userData.cols;
@@ -101,6 +118,7 @@ export class AsciiComposer {
         uGamma: { value: this.gamma },
         uFg: { value: new THREE.Vector3(this.fg.r, this.fg.g, this.fg.b) },
         uBg: { value: new THREE.Vector3(this.bg.r, this.bg.g, this.bg.b) },
+        uFill: { value: this.fill },
         uTime: { value: 0 },
         uScanline: { value: this.fx.scanline },
         uVignette: { value: this.fx.vignette },
@@ -138,6 +156,7 @@ export class AsciiComposer {
         uniform float uGamma;
         uniform vec3 uFg;
         uniform vec3 uBg;
+        uniform float uFill;
         uniform float uTime;
         uniform float uScanline;
         uniform float uVignette;
@@ -253,6 +272,12 @@ export class AsciiComposer {
           outCol = mix(uFg * (0.55 + l * 0.9), outCol, uColor);
           vec3 ink = uBg;
           vec3 rgb = mix(ink, outCol, glyph);
+
+          // Paint a fraction of the cell colour into the empty part of the cell.
+          // Glyphs only ink a small part of their box, so without this fill the
+          // frame averages ~5-9x darker than the raw scene and large areas go
+          // pure black. Kept below full strength so glyphs keep their contrast.
+          rgb += outCol * uFill * (1.0 - glyph);
 
           // subtle additive glow from bloom
           rgb += outCol * bloom * uBloom * 0.18;
