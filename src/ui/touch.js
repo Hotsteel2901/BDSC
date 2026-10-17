@@ -53,7 +53,7 @@ export class TouchControls {
       </div>
       <div id="touch-actions">
         <div class="tbtn small heal" data-tap="KeyQ"><b>✚</b><span data-i18n="touch.heal">${t('touch.heal')}</span></div>
-        <div class="tbtn small grenade" data-tap="KeyG"><b>✦</b><span data-i18n="touch.grenade">${t('touch.grenade')}</span></div>
+        <div class="tbtn small grenade" data-hold="KeyG"><b>✦</b><span data-i18n="touch.grenade">${t('touch.grenade')}</span></div>
         <div class="tbtn small crouch" data-toggle="crouch"><b>▼</b><span data-i18n="touch.crouch">${t('touch.crouch')}</span></div>
         <div class="tbtn reload" data-tap="KeyR"><b>⟳</b><span data-i18n="touch.reload">${t('touch.reload')}</span></div>
         <div class="tbtn ads" data-toggle="ads"><b>◎</b><span data-i18n="touch.ads">${t('touch.ads')}</span></div>

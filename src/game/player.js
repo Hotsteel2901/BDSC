@@ -73,6 +73,10 @@ export class Player {
     this.bobTime = 0;
     this.bobAmount = 0;
     this.landImpact = 0;
+    this.landDip = 0;
+    // Set by takeDamage, consumed by the HUD so damage-over-time ticks do not
+    // strobe the fullscreen damage vignette every frame.
+    this.hitEvent = null;
     this.viewShake = 0;
     this.recoilPitch = 0;
     this.recoilYaw = 0;
@@ -85,6 +89,29 @@ export class Player {
     this._tmpMax = new THREE.Vector3();
     this._buf = [];
     this._seen = new Set();
+  }
+
+  /**
+   * Full per-run reset. Unlike `reset()` (which positions the player between
+   * deaths) this also clears meta upgrades that a previous run may have granted
+   * — FUN MODE's speed/jump/invincibility, max-HP armour boosters, statuses and
+   * the blade-brace root. Keeps a run from leaking into the next.
+   */
+  resetRun() {
+    this.maxHealth = 100;
+    this.maxArmor = 100;
+    this.invincible = false;
+    this.speedMul = 1;
+    this.jumpMul = 1;
+    this.bladeRoot = false;
+    this.statuses = {};
+    this.statusMods = { speedMul: 1, dmgTakenMul: 1, dps: 0, dmgDealtMul: 1, fireMul: 1 };
+    this.cloaked = false;
+    this.shield = 0; this.shieldDecay = 0;
+    this.bobTime = 0; this.bobAmount = 0; this.landImpact = 0; this.landDip = 0; this.viewShake = 0;
+    this.hitEvent = null;
+    this.recoilPitch = 0; this.recoilYaw = 0;
+    this._dashCd = 0; this._stepPhase = 0;
   }
 
   reset(pos, yaw = 0) {
@@ -205,6 +232,7 @@ export class Player {
       const impact = -this.landImpact;
       if (this.audio) this.audio.land(impact > 5);
       this.viewShake = Math.min(0.6, Math.max(0, impact * 0.05));
+      this.landDip = Math.min(0.20, Math.max(0, impact * 0.016));
     }
 
     // --- footsteps ---
@@ -242,6 +270,7 @@ export class Player {
     }
     this.viewShake *= Math.max(0, 1 - dt * 6);
     this.landImpact *= Math.max(0, 1 - dt * 6);
+    this.landDip *= Math.max(0, 1 - dt * 7);
     this.updateLookRecoil(dt);
 
     this._syncCamera();
@@ -425,6 +454,7 @@ export class Player {
     }
     this.health -= dmg;
     this._sinceDamage = 0;
+    this.hitEvent = { amount, at: performance.now() };
     this.viewShake = Math.min(0.8, this.viewShake + 0.25 + amount * 0.003);
     if (fromDir) {
       this.recoilYaw += fromDir.x * 0.02;
@@ -520,12 +550,17 @@ export class Player {
     const sy = (Math.random() - 0.5) * shake * 0.4;
     this.camera.position.set(
       this.pos.x + bx + sx,
-      this.pos.y + this.eyeHeight + by + sy,
+      this.pos.y + this.eyeHeight + by + sy - this.landDip,
       this.pos.z
     );
     const yaw = this.yaw + this.recoilYaw + sx * 0.2;
     const pitch = this.pitch + this.recoilPitch + sy * 0.2;
-    this.camera.rotation.set(pitch, yaw, Math.sin(this.bobTime * 0.5) * 0.01 * bob, 'YXZ');
+    // Small analog lean: sprinting pitches the view slightly into the run and
+    // strafing rolls the horizon. Kept subtle so aiming stays readable.
+    const strafe = this.moveInput.x || 0;
+    const sprintLean = this.sprinting ? -0.012 : 0;
+    const roll = Math.sin(this.bobTime * 0.5) * 0.01 * bob + strafe * 0.018;
+    this.camera.rotation.set(pitch + sprintLean, yaw, roll, 'YXZ');
   }
 
   addRecoil(pitch, yaw) {

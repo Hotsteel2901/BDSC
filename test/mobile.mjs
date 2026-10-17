@@ -193,16 +193,22 @@ try {
   }, { helpers: HELPERS });
   check(quick.used, 'quickbar slot uses the item (heal)');
 
-  // ---- grenade ----
+  // ---- grenade (hold to charge, release to throw) ----
   const nade = await page.evaluate(async ({ helpers }) => {
     const f = eval(helpers);
     const frames = (n) => new Promise(res => { let i = 0; const tick = () => { if (++i >= n) res(); else requestAnimationFrame(tick); }; requestAnimationFrame(tick); });
     const g = window.__game;
+    const btn = document.querySelector('.tbtn.grenade');
     const n0 = g.grenades;
-    f(document.querySelector('.tbtn.grenade'), 'pointerdown', 660, 110);
-    await frames(4);
-    return { n0, n1: g.grenades, proj: g.projectiles.list.length };
+    f(btn, 'pointerdown', 660, 110);
+    await frames(10);
+    const charging = g.grenadeCharging;
+    const charge = g.grenadeCharge;
+    f(btn, 'pointerup', 660, 110);
+    await frames(6);
+    return { n0, n1: g.grenades, proj: g.projectiles.list.length, charging, charge };
   }, { helpers: HELPERS });
+  check(nade.charging && nade.charge > 0.1, `grenade button charges (${nade.charge})`);
   check(nade.n1 < nade.n0 || nade.proj > 0, `grenade button throws (${nade.n0} -> ${nade.n1})`);
 
   // ---- inventory open/close ----

@@ -118,10 +118,28 @@ function buildModel(type) {
       arm.rotation.y = -ang; g.add(arm);
       const rotor = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.03, 8), accentMat);
       rotor.position.set(Math.cos(ang) * 0.7, h * 0.55, Math.sin(ang) * 0.7); g.add(rotor);
+      const motor = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.12, 0.14), dark);
+      motor.position.set(Math.cos(ang) * 0.44, h * 0.56, Math.sin(ang) * 0.44); g.add(motor);
+      parts.rotors = parts.rotors || []; parts.rotors.push(rotor);
       if (i === 0) parts.rotor = rotor;
     }
+    // armoured belly + landing skids + sensor pod
+    const belly = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.12, 0.62), dark);
+    belly.position.set(0, h * 0.36, 0.02); g.add(belly);
+    for (const sx of [-1, 1]) {
+      const skid = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.05, 0.7), dark);
+      skid.position.set(sx * 0.3, h * 0.24, 0.02); g.add(skid);
+    }
+    const pod = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.22), skin);
+    pod.position.set(0, h * 0.62, -0.18); g.add(pod);
+    const lens = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.08, 0.04), core);
+    lens.position.set(0, h * 0.62, -0.30); g.add(lens);
+    const antenna = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.28, 0.02), accentMat);
+    antenna.position.set(0.18, h * 0.78, 0.12); g.add(antenna);
     const gun = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 0.4), dark);
     gun.position.set(0, h * 0.42, -0.55); g.add(gun);
+    const gunTip = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.08, 0.12), accentMat);
+    gunTip.position.set(0, h * 0.42, -0.74); g.add(gunTip);
     parts.muzzle = new THREE.Object3D(); parts.muzzle.position.set(0, h * 0.42, -0.78); g.add(parts.muzzle);
     parts.headY = h * 0.5;
     g.scale.setScalar(1);
@@ -136,9 +154,28 @@ function buildModel(type) {
     const eye = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.16, 0.06), core);
     eye.position.set(0, 0.95, -0.38); g.add(eye);
     parts.core = eye;
+    // Pivoting gun mount: the barrel points along -Z (the front) and pitches
+    // up/down with the target instead of being frozen at a random angle.
+    const cannonPivot = new THREE.Group();
+    cannonPivot.position.set(0, 0.8, 0);
+    g.add(cannonPivot);
     const cannon = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.13, 0.9, 8), dark);
-    cannon.rotation.x = Math.PI / 2; cannon.position.set(0, 0.8, -0.6); g.add(cannon);
-    parts.muzzle = new THREE.Object3D(); parts.muzzle.position.set(0, 0.8, -1.05); g.add(parts.muzzle);
+    cannon.rotation.x = -Math.PI / 2; cannon.position.set(0, 0, -0.6); cannonPivot.add(cannon);
+    for (let i = 0; i < 3; i++) {
+      const ring = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.06, 8), accentMat);
+      ring.rotation.x = -Math.PI / 2; ring.position.set(0, 0, -0.38 - i * 0.22); cannonPivot.add(ring);
+    }
+    parts.muzzle = new THREE.Object3D(); parts.muzzle.position.set(0, 0, -1.05); cannonPivot.add(parts.muzzle);
+    parts.cannonPivot = cannonPivot;
+    // shield plates + ammo drum
+    for (const sx of [-1, 1]) {
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.6, 0.7), dark);
+      plate.position.set(sx * 0.46, 0.85, 0.02); g.add(plate);
+      const trim = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.12, 0.58), accentMat);
+      trim.position.set(sx * 0.51, 1.0, 0.02); g.add(trim);
+    }
+    const drum = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.3, 10), dark);
+    drum.rotation.z = Math.PI / 2; drum.position.set(-0.45, 0.55, 0.2); g.add(drum);
     parts.headY = 0.95;
     parts.canAnimateLegs = false;
     parts.turretBody = body; parts.turretEye = eye; parts.cannon = cannon;
@@ -164,6 +201,18 @@ function buildModel(type) {
   const chest = new THREE.Mesh(new THREE.BoxGeometry(0.18 * scale, 0.18 * scale, 0.06), core);
   chest.position.set(0, torsoY + torsoH * 0.12, -0.22 * scale); g.add(chest);
   parts.core = chest;
+  // chest armour plates + vents
+  for (const sx of [-1, 1]) {
+    const plate = new THREE.Mesh(new THREE.BoxGeometry(0.2 * scale, 0.26 * scale, 0.08), dark);
+    plate.position.set(sx * 0.2 * scale, torsoY + torsoH * 0.06, -0.215 * scale); g.add(plate);
+    const vent = new THREE.Mesh(new THREE.BoxGeometry(0.15 * scale, 0.03, 0.03), accentMat);
+    vent.position.set(sx * 0.2 * scale, torsoY + torsoH * 0.2, -0.26 * scale); g.add(vent);
+  }
+  // backpack / power cell
+  const pack = new THREE.Mesh(new THREE.BoxGeometry(0.38 * scale, 0.42 * scale, 0.18), dark);
+  pack.position.set(0, torsoY + 0.02, 0.27 * scale); g.add(pack);
+  const packCore = new THREE.Mesh(new THREE.BoxGeometry(0.2 * scale, 0.06, 0.03), accentMat);
+  packCore.position.set(0, torsoY + 0.04, 0.37 * scale); g.add(packCore);
   // shoulder pads + glowing trim (reads as a bright line in ASCII)
   const shoulder = new THREE.Mesh(new THREE.BoxGeometry(0.86 * scale, 0.2 * scale, 0.44 * scale), dark);
   shoulder.position.y = torsoY + torsoH * 0.34; g.add(shoulder);
@@ -174,8 +223,18 @@ function buildModel(type) {
 
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.36 * scale, headH, 0.36 * scale), skin);
   head.position.y = headY; g.add(head);
+  // Everything attached to the head must be a *child* of it, otherwise the
+  // visor/helmet stay frozen while the head scans (very visible in ASCII).
   const visor = new THREE.Mesh(new THREE.BoxGeometry(0.3 * scale, 0.07, 0.04), accentMat);
-  visor.position.set(0, headY + 0.02, -0.2 * scale); g.add(visor);
+  visor.position.set(0, 0.02, -0.2 * scale); head.add(visor);
+  const brow = new THREE.Mesh(new THREE.BoxGeometry(0.38 * scale, 0.05, 0.38 * scale), dark);
+  brow.position.set(0, headH * 0.42, 0); head.add(brow);
+  for (const sx of [-1, 1]) {
+    const ear = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.1, 0.12), dark);
+    ear.position.set(sx * 0.19 * scale, 0, 0); head.add(ear);
+  }
+  const antenna = new THREE.Mesh(new THREE.BoxGeometry(0.018, 0.22, 0.018), accentMat);
+  antenna.position.set(0.14 * scale, headH * 0.5 + 0.11, 0.08); head.add(antenna);
   parts.head = head; parts.visor = visor;
 
   // legs (pivot at hip)
@@ -187,6 +246,10 @@ function buildModel(type) {
     const lowerPivot = new THREE.Group(); lowerPivot.position.y = -legH * 0.55; pivot.add(lowerPivot);
     const lower = new THREE.Mesh(new THREE.BoxGeometry(0.18 * scale, legH * 0.5, 0.2 * scale), skin);
     lower.position.y = -legH * 0.25; lowerPivot.add(lower);
+    const knee = new THREE.Mesh(new THREE.BoxGeometry(0.22 * scale, 0.1, 0.24 * scale), dark);
+    knee.position.set(0, -0.02, -0.02); lowerPivot.add(knee);
+    const boot = new THREE.Mesh(new THREE.BoxGeometry(0.24 * scale, 0.14, 0.34 * scale), dark);
+    boot.position.set(0, -legH * 0.5 + 0.07, -0.05); lowerPivot.add(boot);
     pivot.userData.lower = lowerPivot;
     g.add(pivot);
     return pivot;
@@ -202,6 +265,10 @@ function buildModel(type) {
     upper.position.y = -torsoH * 0.35; pivot.add(upper);
     const fore = new THREE.Mesh(new THREE.BoxGeometry(0.16 * scale, torsoH * 0.7, 0.16 * scale), dark);
     fore.position.set(0, -torsoH * 0.7, -torsoH * 0.35); pivot.add(fore);
+    const elbow = new THREE.Mesh(new THREE.BoxGeometry(0.2 * scale, 0.14, 0.2 * scale), accentMat);
+    elbow.position.set(0, -torsoH * 0.72, -torsoH * 0.3); pivot.add(elbow);
+    const hand = new THREE.Mesh(new THREE.BoxGeometry(0.14 * scale, 0.14, 0.16 * scale), dark);
+    hand.position.set(0, -torsoH * 0.95, -torsoH * 0.62); pivot.add(hand);
     pivot.rotation.x = -Math.PI / 2.2;
     g.add(pivot);
     return pivot;
@@ -876,6 +943,7 @@ export class Enemy {
     this.health -= dmg;
     this.hitFlash = 1;
     this.lastDamageTime = this._ctxTime || 0;
+    this.lastDamageSrc = src || 'generic';
     this.suppression = Math.min(1.5, this.suppression + 0.4 + (head ? 0.3 : 0));
     if (head && this.health > 0) this.stagger = Math.max(this.stagger, 0.14);
     else this.stagger = Math.max(this.stagger, 0.05);
@@ -990,69 +1058,122 @@ export class Enemy {
     }
 
     this.root.position.copy(this.pos);
-    this.root.rotation.y = this.yaw;
+    // Smooth facing instead of snapping the whole model on every path node.
+    let dyaw = this.yaw - this.root.rotation.y;
+    dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+    this.root.rotation.y += dyaw * Math.min(1, dt * 9);
   }
 
   _animate(dt, ctx) {
     const T = this.type;
     const parts = this.parts;
+    const tm = ctx ? ctx.time : 0;
     // Hostile marker: keep a roughly constant on-screen size so distant units
     // stay readable, and pulse gently so moving targets catch the eye.
     if (parts.marker) {
       const dist = ctx && ctx.cameraPos ? ctx.cameraPos.distanceTo(this.pos) : 24;
       const s = THREE.MathUtils.clamp(dist * 0.045, 0.45, 3.6);
       parts.marker.scale.set(s, s, s);
-      const tm = ctx ? ctx.time : 0;
       parts.marker.position.y = T.height + 0.55 + Math.sin(tm * 3 + this.walkPhase) * 0.05;
-      // gentle pulse so moving hostiles catch the eye
       parts.marker.material.opacity = 0.8 + 0.2 * (0.5 + 0.5 * Math.sin(tm * 5 + this.walkPhase));
       parts.marker.visible = this.alive;
     }
-    if (T.stationary) {
-      if (parts.cannon) {
-        // aim turret at target
-        const to = this.target || (this.state === 'combat' ? null : null);
-        if (to) {
-          const dx = to.x - this.pos.x, dz = to.z - this.pos.z;
-          this.root.rotation.y = Math.atan2(dx, dz);
-          parts.cannon.rotation.x = Math.PI / 2;
-        }
-      }
-      return;
-    }
-    const speed = Math.hypot(this.vel.x, this.vel.z);
-    if (parts.canAnimateLegs) {
-      this.walkPhase += dt * (2 + speed * 2.2);
-      const sw = Math.sin(this.walkPhase) * Math.min(1, speed / 4) * (this.wantCrouch ? 0.4 : 0.8);
-      parts.legL.rotation.x = sw;
-      parts.legR.rotation.x = -sw;
-      if (parts.legL.userData.lower) parts.legL.userData.lower.rotation.x = Math.max(0, -sw) * 0.8;
-      if (parts.legR.userData.lower) parts.legR.userData.lower.rotation.x = Math.max(0, sw) * 0.8;
-      // torso bob
-      parts.root.position.y = this.pos.y + Math.abs(Math.sin(this.walkPhase)) * 0.04 * Math.min(1, speed / 4);
-      // arms: aim
-      if (this.state === 'combat' && this.target) {
-        const aimPitch = THREE.MathUtils.clamp(Math.atan2(
-          (this.target.y) - (this.pos.y + parts.headY), this.pos.distanceTo(this.target)), -1, 1);
-        parts.armL.rotation.x = -Math.PI / 2.2 + aimPitch;
-        parts.armR.rotation.x = -Math.PI / 2.2 + aimPitch;
-      } else {
-        parts.armL.rotation.x = -Math.PI / 2.2;
-        parts.armR.rotation.x = -Math.PI / 2.2;
-      }
-      // crouch
-      const crouchTarget = this.wantCrouch ? 0.35 : 0;
-      parts.root.scale.y += ((1 - crouchTarget) - parts.root.scale.y) * Math.min(1, dt * 6);
-    } else if (parts.rotor) {
-      parts.rotor.rotation.y += dt * 30;
-    }
-    // hit flash on core
+
+    // hit flash on the core / accent trim
     if (parts.materials) {
       const f = this.hitFlash;
       parts.materials.core.emissiveIntensity = 1.6 + f * 6;
       parts.materials.core.emissive.setHex(f > 0.1 ? 0xffffff : T.accent);
+      if (parts.materials.accentMat) parts.materials.accentMat.emissiveIntensity = 1.7 + f * 3.5;
     }
-    // laser
+
+    if (T.stationary) {
+      // Turret tracks the target with a heavy servo lag + barrel pitch.
+      let targetYaw = this.root.rotation.y;
+      let pitch = 0;
+      const to = this.target;
+      if (to) {
+        const dx = to.x - this.pos.x, dz = to.z - this.pos.z;
+        targetYaw = Math.atan2(dx, dz);
+        const horiz = Math.max(0.5, Math.hypot(dx, dz));
+        pitch = Math.atan2((to.y || 1.2) - (this.pos.y + (parts.headY || 0.9)), horiz);
+      }
+      let dy = targetYaw - this.root.rotation.y;
+      dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+      this.root.rotation.y += dy * Math.min(1, dt * 4.5);
+      if (parts.cannonPivot) {
+        const target = THREE.MathUtils.clamp(pitch, -0.45, 0.45);
+        parts.cannonPivot.rotation.x += (target - parts.cannonPivot.rotation.x) * Math.min(1, dt * 6);
+      }
+      if (parts.turretEye) {
+        const pulse = 0.5 + 0.5 * Math.sin(tm * 4 + this.walkPhase);
+        parts.turretEye.scale.setScalar(0.85 + pulse * 0.15);
+        parts.turretEye.material.emissiveIntensity = 2.2 + pulse * 2.2;
+      }
+      return;
+    }
+
+    const speed = Math.hypot(this.vel.x, this.vel.z);
+    // body-local side velocity (for lean)
+    const rightX = Math.cos(this.root.rotation.y), rightZ = -Math.sin(this.root.rotation.y);
+    const sideVel = this.vel.x * rightX + this.vel.z * rightZ;
+
+    if (parts.canAnimateLegs) {
+      const stride = Math.min(1, speed / 4.2);
+      this.walkPhase += dt * (2 + speed * 2.2);
+      const sw = Math.sin(this.walkPhase) * stride * (this.wantCrouch ? 0.35 : 0.8);
+      parts.legL.rotation.x = sw;
+      parts.legR.rotation.x = -sw;
+      if (parts.legL.userData.lower) parts.legL.userData.lower.rotation.x = Math.max(0, -sw) * 0.85;
+      if (parts.legR.userData.lower) parts.legR.userData.lower.rotation.x = Math.max(0, sw) * 0.85;
+      // torso bob + forward lean + side lean
+      parts.root.position.y = this.pos.y + Math.abs(Math.sin(this.walkPhase)) * 0.045 * stride;
+      parts.root.rotation.x = -stride * 0.07 + this.hitFlash * 0.05;
+      parts.root.rotation.z = -sideVel * 0.012 - this.hitFlash * 0.06;
+
+      const inCombat = this.state === 'combat' && this.target;
+      let aimPitch = 0;
+      if (inCombat) {
+        const dx = this.target.x - this.pos.x, dz = this.target.z - this.pos.z;
+        const horiz = Math.max(0.6, Math.hypot(dx, dz));
+        aimPitch = THREE.MathUtils.clamp(Math.atan2(this.target.y - (this.pos.y + parts.headY), horiz), -0.9, 0.9);
+        parts.armL.rotation.x = -Math.PI / 2.2 + aimPitch + Math.sin(this.walkPhase) * 0.07 * stride;
+        parts.armR.rotation.x = -Math.PI / 2.2 + aimPitch - Math.sin(this.walkPhase) * 0.07 * stride;
+      } else {
+        // patrol / reload: weapon lowered, arms swing with the walk
+        const swing = Math.sin(this.walkPhase) * stride * 0.22;
+        parts.armL.rotation.x = -1.15 + swing;
+        parts.armR.rotation.x = -1.15 - swing;
+      }
+      // head looks where the unit is aiming, or scans when idle
+      if (parts.head) {
+        if (inCombat) {
+          const dx = this.target.x - this.pos.x, dz = this.target.z - this.pos.z;
+          let rel = Math.atan2(dx, dz) - this.root.rotation.y;
+          rel = Math.atan2(Math.sin(rel), Math.cos(rel));
+          parts.head.rotation.y += (THREE.MathUtils.clamp(rel, -0.5, 0.5) - parts.head.rotation.y) * Math.min(1, dt * 8);
+          parts.head.rotation.x = aimPitch * 0.3;
+        } else {
+          parts.head.rotation.y = Math.sin(tm * 0.7 + this.walkPhase) * 0.35;
+          parts.head.rotation.x = Math.sin(tm * 0.5 + this.walkPhase) * 0.08;
+        }
+      }
+      if (parts.gun) parts.gun.rotation.x = inCombat ? aimPitch * 0.75 : 0.25;
+      if (parts.visor) parts.visor.material.emissiveIntensity = 1.5 + (inCombat ? 0.9 : 0.2) * (0.5 + 0.5 * Math.sin(tm * 6 + this.walkPhase));
+      // crouch: squash the silhouette but keep the feet planted
+      const crouchTarget = this.wantCrouch ? 0.35 : 0;
+      parts.root.scale.y += ((1 - crouchTarget) - parts.root.scale.y) * Math.min(1, dt * 6);
+    } else if (parts.rotors) {
+      for (const r of parts.rotors) r.rotation.y += dt * (32 + (this.walkPhase % 1) * 4);
+      // bank into movement
+      const bankX = THREE.MathUtils.clamp(this.vel.z * 0.035, -0.22, 0.22);
+      const bankZ = THREE.MathUtils.clamp(-this.vel.x * 0.035, -0.22, 0.22);
+      parts.root.rotation.x += (bankX - parts.root.rotation.x) * Math.min(1, dt * 5);
+      parts.root.rotation.z += (bankZ - parts.root.rotation.z) * Math.min(1, dt * 5);
+    }
+
+    if (parts.aura) parts.aura.rotation.z += dt * 2.2;
+    // laser sight
     if (parts.laser) parts.laser.visible = this.state === 'combat';
   }
 }
@@ -1092,7 +1213,7 @@ export class EnemyManager {
       id: 'me', isLocal: true, alive: player.alive, speed: player.speed,
       cloaked: player.cloaked,
       pos: player.pos,
-      takeDamage: (a) => player.takeDamage(a),
+      takeDamage: (a, dir, kind, point) => player.takeDamage(a, dir, kind, point),
     }];
     if (this.net && this.net.isHost) {
       for (const [, p] of this.net.players) {
@@ -1141,7 +1262,7 @@ export class EnemyManager {
       const aura = new THREE.Mesh(new THREE.TorusGeometry(0.7, 0.05, 6, 20),
         new THREE.MeshBasicMaterial({ color: 0xffb000, transparent: true, opacity: 0.7, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
       aura.rotation.x = Math.PI / 2; aura.position.y = 0.1; e.root.add(aura);
-      e.aura = aura;
+      e.aura = aura; e.parts.aura = aura;
     }
     squad.add(e);
     this.group.add(e.root);

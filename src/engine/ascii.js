@@ -45,12 +45,12 @@ export class AsciiComposer {
   constructor(renderer, opts = {}) {
     this.renderer = renderer;
     this.charSize = opts.charSize || 12;     // cell size in screen px
-    this.resMult = opts.resMult || 4;        // internal pixels per cell (AA for small bright features)
+    this.resMult = opts.resMult || 6;        // internal pixels per cell (AA for small bright features)
     this.color = opts.color !== false;       // tint glyphs with scene colour
     this.edge = opts.edge !== false;         // sobel edge -> outline glyphs
-    this.contrast = opts.contrast ?? 1.10;
-    this.brightness = opts.brightness ?? 2.20;
-    this.saturation = opts.saturation ?? 1.15;
+    this.contrast = opts.contrast ?? 1.06;
+    this.brightness = opts.brightness ?? 2.50;
+    this.saturation = opts.saturation ?? 1.12;
     this.gamma = opts.gamma ?? 0.4545; // linear -> sRGB (1/2.2)
     this.densityRamp = opts.ramp || DEFAULT_RAMP;
     this.ramp = fullRamp(this.densityRamp);   // density glyphs + structural edges
@@ -63,18 +63,18 @@ export class AsciiComposer {
       // Very restrained post FX. Heavy scanlines / grain / aberration / vignette
       // all ate into glyph legibility and, critically, multiplied the frame
       // darker — they now default near-off and can still be tuned per option.
-      scanline: opts.scanline ?? 0.03,
-      vignette: opts.vignette ?? 0.07,
-      bloom: opts.bloom ?? 0.34,
-      aberration: opts.aberration ?? 0.18,
-      noise: opts.noise ?? 0.006,
+      scanline: opts.scanline ?? 0.02,
+      vignette: opts.vignette ?? 0.035,
+      bloom: opts.bloom ?? 0.22,
+      aberration: opts.aberration ?? 0.10,
+      noise: opts.noise ?? 0.005,
       flicker: opts.flicker ?? 0.003,
     };
     // Fraction of the cell colour painted into the empty part of every glyph
     // cell. ASCII glyphs only ink ~20-40% of a cell, so without this the vast
     // majority of the frame collapses to background black and the whole image
     // reads far darker than the raw 3D render.
-    this.fill = opts.fill ?? 0.52;
+    this.fill = opts.fill ?? 0.56;
 
     this.fontTexture = makeFontAtlas(this.ramp, 32);
     this.fontCols = this.fontTexture.userData.cols;
@@ -103,7 +103,7 @@ export class AsciiComposer {
         tScene: { value: null },
         tBright: { value: null },
         tFont: { value: this.fontTexture },
-        uResolution: { value: new THREE.Vector2(1, 1) },
+        uScreenRes: { value: new THREE.Vector2(1, 1) },
         uCharSize: { value: this.charSize },
         uFontCols: { value: this.fontCols },
         uFontRows: { value: this.fontRows },
@@ -141,7 +141,7 @@ export class AsciiComposer {
         uniform sampler2D tScene;
         uniform sampler2D tBright;
         uniform sampler2D tFont;
-        uniform vec2 uResolution;
+        uniform vec2 uScreenRes;
         uniform float uCharSize;
         uniform float uFontCols;
         uniform float uFontRows;
@@ -190,15 +190,20 @@ export class AsciiComposer {
 
         void main(){
           float cell = uCharSize;
-          vec2 px = vUv * uResolution;
+
+          // The glyph grid is laid out in *screen* pixels so every character is
+          // rasterised at full display resolution. (Previously the grid used the
+          // low-res scene render-target resolution, which quantised each glyph
+          // to ~4x4 texels and made the whole frame look like blocky noise.)
+          vec2 px = vUv * uScreenRes;
           vec2 cellIdx = floor(px / cell);
           vec2 cellUv = fract(px / cell);
 
           // sample the scene at the centre of the cell
-          vec2 sampleUv = (cellIdx * cell + cell * 0.5) / uResolution;
+          vec2 sampleUv = (cellIdx * cell + cell * 0.5) / uScreenRes;
 
           // chromatic aberration (centre tap only)
-          vec2 ca = (cellUv - 0.5) * (uAberration / uResolution) * 2.0;
+          vec2 ca = (cellUv - 0.5) * (uAberration / uScreenRes) * 2.0;
           vec3 col;
           col.r = texture2D(tScene, sampleUv + ca).r;
           col.g = texture2D(tScene, sampleUv).g;
@@ -207,7 +212,7 @@ export class AsciiComposer {
           // --- stable fill ---
           // Average a small cross of taps so a flat surface settles on a single
           // glyph instead of shimmering between neighbouring density levels.
-          vec2 off = vec2(cell * 0.34) / uResolution;
+          vec2 off = vec2(cell * 0.34) / uScreenRes;
           vec3 sR = texture2D(tScene, sampleUv + vec2(off.x, 0.0)).rgb;
           vec3 sL = texture2D(tScene, sampleUv - vec2(off.x, 0.0)).rgb;
           vec3 sD = texture2D(tScene, sampleUv + vec2(0.0, off.y)).rgb;
@@ -225,7 +230,7 @@ export class AsciiComposer {
           float l = luma(gFill);
           if (peakFound > 0.5) {
             vec3 gp = grade(rawPeak); float gl = luma(gp);
-            float adopt = smoothstep(0.10, 0.34, gl - l);
+            float adopt = smoothstep(0.14, 0.38, gl - l);
             gFill = mix(gFill, gp, adopt);
             l = mix(l, gl, adopt);
           }
@@ -233,14 +238,14 @@ export class AsciiComposer {
           // --- edges at cell scale (luminance sobel) ---
           float edgeAmt = 0.0; float egx = 0.0, egy = 0.0;
           if (uEdge > 0.5) {
-            vec2 t = vec2(cell) / uResolution;
+            vec2 t = vec2(cell) / uScreenRes;
             float eR = luma(texture2D(tScene, sampleUv + vec2(t.x, 0.0)).rgb);
             float eL = luma(texture2D(tScene, sampleUv - vec2(t.x, 0.0)).rgb);
             float eD = luma(texture2D(tScene, sampleUv + vec2(0.0, t.y)).rgb);
             float eU = luma(texture2D(tScene, sampleUv - vec2(0.0, t.y)).rgb);
             egx = eR - eL;
             egy = eD - eU;
-            edgeAmt = clamp(length(vec2(egx, egy)) * 2.2, 0.0, 1.0);
+            edgeAmt = clamp(length(vec2(egx, egy)) * 2.5, 0.0, 1.0);
           }
 
           // add a touch of the bright pass (bloom) to luminance only
@@ -254,7 +259,7 @@ export class AsciiComposer {
 
           // On strong edges prefer a *structural* glyph chosen by the gradient
           // orientation, so walls/targets read as crisp line art.
-          if (uEdge > 0.5 && edgeAmt > 0.5) {
+          if (uEdge > 0.5 && edgeAmt > 0.46) {
             float adx = abs(egx), ady = abs(egy);
             float sel;
             if (adx > ady * 1.45) sel = 0.0;            // vertical edge -> |
@@ -276,8 +281,10 @@ export class AsciiComposer {
           // Paint a fraction of the cell colour into the empty part of the cell.
           // Glyphs only ink a small part of their box, so without this fill the
           // frame averages ~5-9x darker than the raw scene and large areas go
-          // pure black. Kept below full strength so glyphs keep their contrast.
-          rgb += outCol * uFill * (1.0 - glyph);
+          // pure black. Dark cells get a little extra so unlit streets and
+          // interiors stay readable without flattening bright highlights.
+          float fillAmt = uFill * mix(1.38, 0.92, smoothstep(0.06, 0.55, l));
+          rgb += outCol * fillAmt * (1.0 - glyph);
 
           // subtle additive glow from bloom
           rgb += outCol * bloom * uBloom * 0.18;
@@ -344,10 +351,10 @@ export class AsciiComposer {
     const rh = Math.floor(cellsY * this.resMult);
     this.rt.setSize(rw, rh);
     this.brightRT.setSize(rw, rh);
-    this.material.uniforms.uResolution.value.set(rw, rh);
-    // Cell size expressed in *render-target* pixels (== 2).
-    this.cellPx = rw / cellsX;
-    this.material.uniforms.uCharSize.value = this.cellPx;
+    this.material.uniforms.uScreenRes.value.set(w, h);
+    // Cells are square in screen pixels; no render-target quantisation.
+    this.cellPx = this.charSize;
+    this.material.uniforms.uCharSize.value = this.charSize;
   }
 
   render(scene, camera, time) {
@@ -358,7 +365,7 @@ export class AsciiComposer {
     }
     const u = this.material.uniforms;
     u.uTime.value = time || 0;
-    u.uCharSize.value = this.cellPx || 2;
+    u.uCharSize.value = this.charSize;
 
     // 1. scene -> rt
     this.renderer.setRenderTarget(this.rt);
@@ -406,9 +413,12 @@ export class AsciiComposer {
  * The red channel carries the mask so the shader can index with .r.
  */
 export function makeFontAtlas(ramp, cell = 32) {
-  const cols = Math.min(16, Math.max(1, Math.ceil(Math.sqrt(ramp.length))));
-  // widen to keep power-of-two-ish, but arbitrary is fine for a CanvasTexture
-  const rows = Math.ceil(ramp.length / cols);
+  // 16 columns + a power-of-two row count keeps the atlas power-of-two in both
+  // dimensions, so mipmaps work on every WebGL implementation and the glyphs
+  // stay stable when minified to the on-screen cell size.
+  const cols = 16;
+  const rowCount = Math.ceil(ramp.length / cols);
+  const rows = Math.max(1, 2 ** Math.ceil(Math.log2(Math.max(1, rowCount))));
   const canvas = document.createElement('canvas');
   canvas.width = cols * cell;
   canvas.height = rows * cell;
@@ -427,11 +437,12 @@ export function makeFontAtlas(ramp, cell = 32) {
   }
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
-  // No mipmaps: the compose pass samples each glyph on its own cell, and
-  // mipmapping only blurred the strokes. Linear filtering keeps them crisp.
-  tex.minFilter = THREE.LinearFilter;
+  // The atlas is rasterised larger than the on-screen cell, so mipped
+  // minification is what keeps strokes stable instead of shimmering.
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
   tex.magFilter = THREE.LinearFilter;
-  tex.generateMipmaps = false;
+  tex.generateMipmaps = true;
+  tex.anisotropy = 2;
   tex.wrapS = THREE.ClampToEdgeWrapping;
   tex.wrapT = THREE.ClampToEdgeWrapping;
   tex.needsUpdate = true;

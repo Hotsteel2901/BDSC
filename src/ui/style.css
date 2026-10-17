@@ -87,6 +87,14 @@ label.field { display:flex; flex-direction:column; gap:4px; font-size:11px; opac
 .bar .full { color: var(--accent); }
 .bar .empty { color: var(--dim); }
 #crosshair { position:absolute; left:50%; top:50%; transform:translate(-50%,-50%); font-size:16px; color:var(--accent); text-shadow:0 0 6px #000; }
+#grenade-charge { position:absolute; left:50%; top:calc(50% + 34px); transform:translateX(-50%); width:130px; opacity:0; transition:opacity .12s; pointer-events:none; text-shadow:0 0 6px #000; }
+#grenade-charge.on { opacity:1; }
+#grenade-charge .track { height:5px; border:1px solid var(--accent); background:rgba(0,0,0,.55); }
+#grenade-charge .fill { height:100%; width:0; background:var(--accent); box-shadow:0 0 6px var(--accent); }
+#grenade-charge.full .fill { background:var(--accent2); box-shadow:0 0 10px var(--accent2); }
+#grenade-charge .lbl { display:block; text-align:center; font-size:9px; letter-spacing:2px; opacity:.85; margin-top:3px; }
+#enter-hint { position:absolute; left:50%; bottom:29%; transform:translateX(-50%); font-size:12px; color:var(--accent); border:1px solid var(--accent); background:rgba(2,14,8,.72); padding:4px 10px; letter-spacing:1px; opacity:0; transition:opacity .18s; pointer-events:none; text-shadow:0 0 6px #000; }
+#enter-hint.on { opacity:1; }
 
 /* ---------- RIFLE SCOPE ---------- */
 /* A real scope: black surround, transparent lens, crosshair + mil ticks.

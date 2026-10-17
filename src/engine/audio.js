@@ -65,11 +65,116 @@ export class AudioEngine {
     this.noisePink = this._makePinkNoise(2.0);
 
     this._ambience = null;
+
+    // ---- overload protection -------------------------------------------
+    // Under a 150-enemy horde the game can ask for dozens of voices in one
+    // frame. Every oscillator/filter/gain scheduled into the graph costs CPU;
+    // unbounded scheduling is what made the audio "freeze" (the context falls
+    // behind, then every queued sound fires at once when it catches up). A
+    // simple leaky-bucket voice budget drops low-priority sounds while keeping
+    // player-critical feedback (explosions, damage, heavy melee) audible.
+    this._voiceLoad = 0;
+    this._voiceT = 0;
+    this._voiceCap = 150;      // ~150 weight units of concurrently-live voices
+    this._voiceDrain = 70;     // weight units recovered per second
+    // One-shot nodes are disconnected after they have finished, otherwise the
+    // graph grows for the whole session (thousands of dead GainNodes).
+    this._cleanup = [];
+    this._lastDuck = -9;
+
+    // ---- stall watchdog ------------------------------------------------
+    this._shouldRun = false;
+    this._ctxSeen = -1;
+    this._ctxStall = 0;
+    this._lastResumeTry = 0;
+    this._lastForceResume = 0;
+
     this.ready = true;
   }
 
   resume() {
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') {
+      try { const p = this.ctx.resume(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* ignore */ }
+    }
+  }
+
+  /** Tell the engine whether gameplay audio should be running (menu vs run). */
+  setShouldRun(on) {
+    this._shouldRun = !!on;
+    if (on) this.resume();
+  }
+
+  /**
+   * Per-frame housekeeping: disconnect finished one-shots, recover a suspended
+   * or stalled AudioContext. Called from the game loop.
+   */
+  tick(dt = 0.016) {
+    const now = this.ctx.currentTime;
+    this._flushCleanup(now);
+    if (!this._shouldRun) return;
+
+    if (this.ctx.state === 'suspended' || this.ctx.state === 'interrupted') {
+      const t = performance.now();
+      if (t - this._lastResumeTry > 1200) {
+        this._lastResumeTry = t;
+        try { const p = this.ctx.resume(); if (p && p.catch) p.catch(() => {}); } catch (e) { /* ignore */ }
+      }
+      this._ctxSeen = now;
+      this._ctxStall = 0;
+      return;
+    }
+
+    // If the context clock is not advancing while "running", the audio thread
+    // is wedged. A suspend/resume cycle re-arms it without losing the graph.
+    if (this._ctxSeen >= 0 && Math.abs(now - this._ctxSeen) < 1e-5) {
+      this._ctxStall += dt;
+      if (this._ctxStall > 1.1) {
+        this._ctxStall = 0;
+        const t = performance.now();
+        if (t - this._lastForceResume > 2500) {
+          this._lastForceResume = t;
+          try {
+            const sp = this.ctx.suspend();
+            if (sp && sp.then) sp.then(() => this.ctx.resume()).catch(() => {});
+          } catch (e) { /* ignore */ }
+        }
+      }
+    } else {
+      this._ctxStall = 0;
+    }
+    this._ctxSeen = now;
+  }
+
+  _queueCleanup(nodes, at) {
+    if (this._cleanup.length > 3000) {
+      // Tick has not run for a long time (menu / background tab). Drop the
+      // oldest finished nodes instead of letting the queue grow without bound.
+      const drop = this._cleanup.splice(0, 1000);
+      for (const item of drop) for (const node of item.nodes) { try { node.disconnect(); } catch (e) { /* gone */ } }
+    }
+    this._cleanup.push({ nodes, at });
+  }
+
+  _flushCleanup(now) {
+    let n = 0;
+    while (n < this._cleanup.length && this._cleanup[n].at <= now) {
+      const item = this._cleanup[n++];
+      for (const node of item.nodes) { try { node.disconnect(); } catch (e) { /* already gone */ } }
+    }
+    if (n) this._cleanup.splice(0, n);
+  }
+
+  /** Reserve weight from the voice budget. Returns false if this sound should be skipped. */
+  _spend(cost, priority = false) {
+    if (this.ctx.state !== 'running') return false;
+    const now = this.ctx.currentTime;
+    const dt = Math.max(0, now - this._voiceT);
+    this._voiceT = now;
+    this._voiceLoad = Math.max(0, this._voiceLoad - dt * this._voiceDrain);
+    const cap = priority ? this._voiceCap * 1.7 : this._voiceCap;
+    if (this._voiceLoad + cost > cap) return false;
+    this._voiceLoad += cost;
+    return true;
   }
 
   setVolumes({ master, sfx, music, ui }) {
@@ -81,6 +186,10 @@ export class AudioEngine {
 
   duckMusic(amount = 0.45, time = 0.5) {
     const now = this.ctx.currentTime;
+    // Automatic fire calls this every round; scheduling a fresh ramp each time
+    // leaves the music permanently pinned down. One duck per 150 ms is plenty.
+    if (now - this._lastDuck < 0.15) return;
+    this._lastDuck = now;
     this.musicBus.gain.cancelScheduledValues(now);
     this.musicBus.gain.setValueAtTime(this.musicBus.gain.value, now);
     this.musicBus.gain.linearRampToValueAtTime(Math.max(0.05, this.musicVol * (1 - amount)), now + 0.08);
@@ -142,6 +251,7 @@ export class AudioEngine {
     if (glideTo != null) o.frequency.exponentialRampToValueAtTime(Math.max(0.01, glideTo), t0 + dur);
     if (detune) o.detune.value = detune;
     o.connect(gainNode);
+    o.onended = () => { try { o.disconnect(); } catch (e) { /* collected */ } };
     o.start(t0);
     o.stop(t0 + dur + 0.05);
     return o;
@@ -151,6 +261,7 @@ export class AudioEngine {
     const s = this.ctx.createBufferSource();
     s.buffer = buffer;
     s.playbackRate.value = playbackRate;
+    s.onended = () => { try { s.disconnect(); } catch (e) { /* collected */ } };
     s.start(t0);
     s.stop(t0 + dur + 0.05);
     return s;
@@ -162,21 +273,27 @@ export class AudioEngine {
     return f;
   }
 
-  _out(bus, gain = 1, pan = 0) {
+  _out(bus, gain = 1, pan = 0, persist = false) {
     const g = this.ctx.createGain();
     g.gain.value = gain;
+    const nodes = [g];
     let node = g;
     if (pan && this.ctx.createStereoPanner) {
       const p = this.ctx.createStereoPanner();
       p.pan.value = pan;
-      g.connect(p); node = p;
+      g.connect(p); node = p; nodes.push(p);
     }
     node.connect(bus);
+    // One-shots live for at most a couple of seconds; six seconds is a safe
+    // margin. Persistent nodes (ambience) are never queued for teardown.
+    if (!persist) this._queueCleanup(nodes, this.ctx.currentTime + 6.0);
     return g;
   }
 
   // ---- weapon sfx -----------------------------------------------------
   gunshot(kind = 'rifle', distance = 0) {
+    if (distance > 150) return;          // inaudible anyway
+    if (!this._spend(8)) return;
     const t0 = this.ctx.currentTime;
     const bus = this.sfxBus;
     const gain = 1 / (1 + distance * 0.008);
@@ -214,6 +331,7 @@ export class AudioEngine {
   }
 
   dryFire() {
+    if (!this._spend(1.5)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.4);
     this._env(g, t0, 0.001, 0.01, 1, 0.1, 0.03, 0.02);
@@ -221,6 +339,7 @@ export class AudioEngine {
   }
 
   reload(stage = 0) {
+    if (!this._spend(2)) return;
     const t0 = this.ctx.currentTime + stage * 0.12;
     const g = this._out(this.sfxBus, 0.5);
     const f = this._filter('bandpass', stage % 2 ? 1400 : 3200, 4);
@@ -232,6 +351,7 @@ export class AudioEngine {
   }
 
   shellDrop() {
+    if (!this._spend(1.5)) return;
     const t0 = this.ctx.currentTime;
     for (let i = 0; i < 2; i++) {
       const tt = t0 + i * 0.09 + Math.random() * 0.03;
@@ -243,6 +363,7 @@ export class AudioEngine {
 
   // ---- impact / damage ------------------------------------------------
   impact(surface = 'concrete', distance = 0) {
+    if (!this._spend(2.5)) return;
     const t0 = this.ctx.currentTime;
     const gain = 1 / (1 + distance * 0.01);
     const cfg = {
@@ -263,6 +384,7 @@ export class AudioEngine {
   }
 
   hurt(severity = 1) {
+    if (!this._spend(5, true)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.6);
     this._env(g, t0, 0.001, 0.02, 1, 0.3, 0.2, 0.18);
@@ -273,6 +395,7 @@ export class AudioEngine {
   }
 
   headshot() {
+    if (!this._spend(3)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.6);
     this._env(g, t0, 0.001, 0.01, 1, 0.2, 0.14, 0.12);
@@ -281,6 +404,7 @@ export class AudioEngine {
   }
 
   killConfirm() {
+    if (!this._spend(2)) return;
     const t0 = this.ctx.currentTime;
     [660, 990, 1480].forEach((f, i) => {
       const g = this._out(this.uiBus, 0.28);
@@ -290,6 +414,7 @@ export class AudioEngine {
   }
 
   enemyDeath(kind = 'grunt') {
+    if (!this._spend(7)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.55);
     this._env(g, t0, 0.005, 0.05, 1, 0.2, 0.4, 0.38);
@@ -309,6 +434,7 @@ export class AudioEngine {
 
   // ---- melee (sword) ---------------------------------------------------
   swordSwing(variant = 0) {
+    if (!this._spend(4)) return;
     const t0 = this.ctx.currentTime;
     // whoosh: bandpassed noise sweeping up then down (the blade slicing air)
     const g = this._out(this.sfxBus, 0.55);
@@ -328,6 +454,7 @@ export class AudioEngine {
 
   /** Blade biting flesh/armour — the satisfying "chop" transient. */
   swordHit(kind = 'flesh', power = 1) {
+    if (!this._spend(6)) return;
     const t0 = this.ctx.currentTime;
     // sharp attack transient
     const click = this._out(this.sfxBus, 0.5 * power);
@@ -353,6 +480,7 @@ export class AudioEngine {
 
   /** Air swing that connects with nothing. */
   swordMiss() {
+    if (!this._spend(2)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.2);
     this._env(g, t0, 0.01, 0.03, 1, 0.3, 0.10, 0.09);
@@ -361,6 +489,7 @@ export class AudioEngine {
 
   /** Big finishing sting for a melee kill. */
   swordKill() {
+    if (!this._spend(5)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.8);
     this._env(g, t0, 0.002, 0.05, 1, 0.25, 0.5, 0.45);
@@ -377,6 +506,7 @@ export class AudioEngine {
 
   /** Bright metallic "ding" when the dao bats a bullet out of the air. */
   swordDeflect(step = 0, chance = 1) {
+    if (!this._spend(3)) return;
     const t0 = this.ctx.currentTime;
     const freqs = [1500, 1900, 2350, 2900, 3500, 4300];
     const f = freqs[((step % freqs.length) + freqs.length) % freqs.length];
@@ -390,6 +520,7 @@ export class AudioEngine {
   }
 
   explosion(scale = 1) {
+    if (!this._spend(14, true)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.9 * scale);
     this._env(g, t0, 0.001, 0.04, 1, 0.35, 0.7 * scale, 0.7 * scale);
@@ -410,6 +541,7 @@ export class AudioEngine {
   }
 
   grenadeBounce() {
+    if (!this._spend(2)) return;
     const t0 = this.ctx.currentTime;
     for (let i = 0; i < 2; i++) {
       const g = this._out(this.sfxBus, 0.25);
@@ -418,8 +550,31 @@ export class AudioEngine {
     }
   }
 
+  /** Charge-and-throw whoosh; a fuller charge gets a deeper, longer wind-up. */
+  grenadeThrow(charge = 0) {
+    if (!this._spend(4, true)) return;
+    const t0 = this.ctx.currentTime;
+    const g = this._out(this.sfxBus, 0.35 + charge * 0.2);
+    this._env(g, t0, 0.015, 0.05, 1, 0.3, 0.10 + charge * 0.10, 0.09 + charge * 0.1);
+    const bp = this._filter('bandpass', 600 + charge * 500, 4);
+    bp.frequency.setValueAtTime(500 + charge * 400, t0);
+    bp.frequency.exponentialRampToValueAtTime(1400 + charge * 1800, t0 + 0.10 + charge * 0.12);
+    this._noiseSrc(this.noise, t0, 0.16 + charge * 0.15, 1.2).connect(bp);
+    bp.connect(g);
+    // pin / safety click
+    const g2 = this._out(this.sfxBus, 0.22);
+    this._env(g2, t0, 0.001, 0.008, 1, 0.1, 0.05, 0.04);
+    this._osc('square', 950 + charge * 300, t0, 0.05, g2, { glideTo: 420 });
+  }
+
+  /** Little confirmation when the throw meter tops out. */
+  chargeReady() {
+    this._blip(1320, 0.07, 0.22, 'triangle');
+  }
+
   // ---- movement -------------------------------------------------------
   footstep(surface = 'concrete', hard = false) {
+    if (!this._spend(1.2)) return;
     const t0 = this.ctx.currentTime;
     const cfg = {
       concrete: { f: 800, dur: 0.08, tone: 120 },
@@ -437,12 +592,14 @@ export class AudioEngine {
   }
 
   jump() {
+    if (!this._spend(1.5)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.25);
     this._env(g, t0, 0.002, 0.02, 1, 0.2, 0.1, 0.08);
     this._noiseSrc(this.noisePink, t0, 0.12).connect(this._filter('lowpass', 1400).connect(g));
   }
   land(hard = false) {
+    if (!this._spend(2)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, hard ? 0.5 : 0.3);
     this._env(g, t0, 0.001, 0.02, 1, 0.15, 0.16, 0.14);
@@ -455,6 +612,7 @@ export class AudioEngine {
   uiHover() { this._blip(1320, 0.03, 0.10, 'triangle'); }
   uiError() { this._blip(180, 0.16, 0.3, 'sawtooth'); }
   _blip(f, dur, gain, type) {
+    if (!this._spend(0.8)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.uiBus, gain);
     this._env(g, t0, 0.001, 0.01, 1, 0.3, dur, dur);
@@ -462,6 +620,7 @@ export class AudioEngine {
   }
 
   pickup(kind = 'ammo') {
+    if (!this._spend(2)) return;
     const t0 = this.ctx.currentTime;
     const notes = kind === 'health' ? [523, 659, 784] : kind === 'armor' ? [392, 523, 659] : [880, 1175];
     notes.forEach((f, i) => {
@@ -472,6 +631,7 @@ export class AudioEngine {
   }
 
   alarm() {
+    if (!this._spend(8)) return;
     const t0 = this.ctx.currentTime;
     for (let i = 0; i < 4; i++) {
       const g = this._out(this.sfxBus, 0.28);
@@ -483,6 +643,7 @@ export class AudioEngine {
   }
 
   radio() {
+    if (!this._spend(2)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.16);
     this._noiseSrc(this.noise, t0, 0.25, 1).connect(this._filter('bandpass', 1800, 1.5).connect(g));
@@ -490,6 +651,7 @@ export class AudioEngine {
   }
 
   spawnWarp() {
+    if (!this._spend(4)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.4);
     this._env(g, t0, 0.3, 0.1, 1, 0.4, 0.5, 0.5);
@@ -500,6 +662,7 @@ export class AudioEngine {
   }
 
   lowHealth() {
+    if (!this._spend(3)) return;
     const t0 = this.ctx.currentTime;
     const g = this._out(this.sfxBus, 0.3);
     this._env(g, t0, 0.01, 0.1, 1, 0.5, 0.5, 0.4);
@@ -511,7 +674,7 @@ export class AudioEngine {
   startAmbience() {
     if (this._ambience) return;
     const t0 = this.ctx.currentTime;
-    const g = this._out(this.sfxBus, 0.10);
+    const g = this._out(this.sfxBus, 0.10, 0, true);
     // low city rumble
     const rumble = this.ctx.createBufferSource();
     rumble.buffer = this.noisePink; rumble.loop = true;
@@ -519,7 +682,7 @@ export class AudioEngine {
     rumble.connect(lp); lp.connect(g);
     rumble.start(t0);
     // wind
-    const windG = this._out(this.sfxBus, 0.05);
+    const windG = this._out(this.sfxBus, 0.05, 0, true);
     const wind = this.ctx.createBufferSource();
     wind.buffer = this.noisePink; wind.loop = true;
     const bp = this._filter('bandpass', 600, 0.6);
@@ -534,7 +697,9 @@ export class AudioEngine {
   }
   stopAmbience() {
     if (!this._ambience) return;
-    try { this._ambience.rumble.stop(); this._ambience.wind.stop(); this._ambience.lfo.stop(); } catch (e) {}
+    const a = this._ambience;
+    try { a.rumble.stop(); a.wind.stop(); a.lfo.stop(); } catch (e) {}
+    try { a.rumble.disconnect(); a.wind.disconnect(); a.lfo.disconnect(); a.g.disconnect(); a.windG.disconnect(); } catch (e) {}
     this._ambience = null;
   }
 

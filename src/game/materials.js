@@ -28,10 +28,10 @@ export function createMaterials() {
     roughness: 0.95, metalness: 0.02, vertexColors: true,
   });
 
-  const street = new THREE.MeshStandardMaterial({ map: makeStreetTexture(), roughness: 0.98, metalness: 0.0 });
+  const street = new THREE.MeshStandardMaterial({ map: makeStreetTexture(), roughness: 0.98, metalness: 0.0, vertexColors: true });
   street.map.repeat.set(1, 1);
 
-  const sidewalk = new THREE.MeshStandardMaterial({ map: makeSidewalkTexture(), roughness: 0.95, metalness: 0.0 });
+  const sidewalk = new THREE.MeshStandardMaterial({ map: makeSidewalkTexture(), roughness: 0.95, metalness: 0.0, vertexColors: true });
 
   const concrete = new THREE.MeshStandardMaterial({ color: 0x5a5f66, roughness: 0.9, vertexColors: true });
   const metal = new THREE.MeshStandardMaterial({ map: makeMetalTexture(), roughness: 0.5, metalness: 0.7, vertexColors: true });
@@ -43,7 +43,8 @@ export function createMaterials() {
     roughness: 0.15, metalness: 0.0, transparent: true, opacity: 0.45,
   });
 
-  const lampEmissive = new THREE.MeshStandardMaterial({ color: 0x221a08, emissive: 0xffcc66, emissiveIntensity: 2.2, roughness: 0.4 });
+  const lampEmissive = new THREE.MeshStandardMaterial({ color: 0x221a08, emissive: 0xffcc66, emissiveIntensity: 1.9, roughness: 0.4 });
+  const ceilingLight = new THREE.MeshStandardMaterial({ color: 0x1a2026, emissive: 0xdce8ff, emissiveIntensity: 0.62, roughness: 0.35 });
   const neonGreen = new THREE.MeshBasicMaterial({ color: 0x37ff8b });
   const neonPink = new THREE.MeshBasicMaterial({ color: 0xff4d9e });
   const neonCyan = new THREE.MeshBasicMaterial({ color: 0x4de0ff });
@@ -63,7 +64,7 @@ export function createMaterials() {
 
   return {
     facades, roof, street, sidewalk, concrete, metal, crate, hazard,
-    glassEmissive, lampEmissive, neonGreen, neonPink, neonCyan, neonAmber,
+    glassEmissive, lampEmissive, ceilingLight, neonGreen, neonPink, neonCyan, neonAmber,
     interiorWall, interiorFloor, windowPane,
     enemySkin, enemyCore, enemyAlly,
   };

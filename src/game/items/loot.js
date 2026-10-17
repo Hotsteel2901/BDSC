@@ -31,7 +31,8 @@ export class LootSystem {
     this.taken = inventory.taken;
     this.remaining = new Map();
     this.populated = new Set();
-    this.cap = 900;
+    this.interiorPopulated = new Set();
+    this.cap = 260;
     this.time = 0;
     this.onPickup = null;
     this.playerPos = new THREE.Vector3();
@@ -44,14 +45,15 @@ export class LootSystem {
     this.active.length = 0;
     this.populated.clear();
     this.remaining.clear();
+    this.interiorPopulated.clear();
   }
 
   ensureAround(player) {
     this.playerPos.copy(player.pos);
     const CS = CHUNK_SIZE;
     const pcx = Math.floor(player.pos.x / CS), pcz = Math.floor(player.pos.z / CS);
-    for (let dx = -2; dx <= 2; dx++) {
-      for (let dz = -2; dz <= 2; dz++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
         const cx = pcx + dx, cz = pcz + dz;
         const key = `${cx},${cz}`;
         if (this.populated.has(key)) continue;
@@ -70,7 +72,7 @@ export class LootSystem {
     const scav = 1 + this.scavenger;
 
     // -------- street scatter (region table) --------
-    const streetCount = Math.round((9 + Math.floor(rng() * 8)) * scav);
+    const streetCount = Math.round((3 + Math.floor(rng() * 4)) * scav);
     for (let i = 0; i < streetCount; i++) {
       const key = `${cx},${cz},s${i}`;
       const x = cx0 + rng() * CHUNK_SIZE, z = cz0 + rng() * CHUNK_SIZE;
@@ -81,7 +83,7 @@ export class LootSystem {
     }
 
     // -------- containers + structure caches --------
-    const containers = Math.round((2 + Math.floor(rng() * 4)) * scav);
+    const containers = Math.round((1 + Math.floor(rng() * 3)) * scav);
     for (let i = 0; i < containers; i++) {
       const key = `${cx},${cz},c${i}`;
       const x = cx0 + rng() * CHUNK_SIZE, z = cz0 + rng() * CHUNK_SIZE;
@@ -95,26 +97,34 @@ export class LootSystem {
       if (this.active.length >= this.cap) break;
     }
 
-    // -------- interior loot (dense, purpose-themed) --------
-    const enterables = [...this.world.enterables.values()]
-      .filter(b => b.x >= cx0 && b.x < cx0 + CHUNK_SIZE && b.z >= cz0 && b.z < cz0 + CHUNK_SIZE)
-      .sort((a, b) => a.bx - b.bx || a.bz - b.bz);
-    for (const b of enterables) {
-      const floors = b.detailFloors || 1;
-      const theme = district.interior[(Math.abs(b.bx * 7 + b.bz * 13)) % district.interior.length];
-      for (let f = 0; f < floors; f++) {
-        const perFloor = 1 + Math.floor(rng() * 2);
-        for (let k = 0; k < perFloor; k++) {
-          const key = `${cx},${cz},i${b.bx},${b.bz},${f},${k}`;
-          const px = b.x + (rng() - 0.5) * (b.w - 2.6);
-          const pz = b.z + (rng() - 0.5) * (b.d - 2.6);
-          const py = f * (b.floorH || 3.6) + 0.2;
-          if (this.world.pointBlocked(px, py + 0.3, pz, 0.25)) continue;
-          const rolls = rollTable(rng, theme, luck);
-          this._spawnList(rolls, px, py, pz, key, `${cx},${cz}`);
-          if (this.active.length >= this.cap) break;
-        }
-        if (this.active.length >= this.cap) break;
+  }
+
+  /**
+   * Interior loot is generated lazily, when the player gets close enough for
+   * the interior mesh to be shown. Paying for hundreds of interior pickups in
+   * every loaded chunk was a needless hit to the loot cap and the draw graph.
+   */
+  populateInterior(b) {
+    const tag = `${b.cx},${b.cz}`;
+    const key = `${tag},i${b.bx},${b.bz}`;
+    if (this.interiorPopulated.has(key)) return;
+    if (this.active.length >= this.cap) return;   // retry once the cap frees up
+    this.interiorPopulated.add(key);
+    const rng = rngFactory(((b.bx * 73856093) ^ (b.bz * 19349663) ^ 0x2f3a5c1d) >>> 0);
+    const district = districtAt(b.x, b.z);
+    const floors = b.detailFloors || 1;
+    const fh = b.floorH || 3.6;
+    const theme = district.interior[(Math.abs(b.bx * 7 + b.bz * 13)) % district.interior.length];
+    for (let f = 0; f < floors; f++) {
+      const perFloor = 1 + (rng() < 0.3 ? 1 : 0);
+      for (let k = 0; k < perFloor; k++) {
+        const px = b.x + (rng() - 0.5) * (b.w - 2.6);
+        const pz = b.z + (rng() - 0.5) * (b.d - 2.6);
+        const py = f * fh + 0.2;
+        if (this.world.pointBlocked(px, py + 0.3, pz, 0.25)) continue;
+        const rolls = rollTable(rng, theme, this.luck);
+        this._spawnList(rolls, px, py, pz, `${key},${f},${k}`, tag);
+        if (this.active.length >= this.cap) return;
       }
     }
   }
@@ -122,6 +132,7 @@ export class LootSystem {
   offChunk(cx, cz) {
     const tag = `${cx},${cz}`;
     this.populated.delete(tag);
+    for (const k of [...this.interiorPopulated]) if (k.startsWith(tag + ',')) this.interiorPopulated.delete(k);
     for (let i = this.active.length - 1; i >= 0; i--) {
       if (this.active[i].chunkTag === tag) {
         if (this.active[i].mesh.parent) this.active[i].mesh.parent.remove(this.active[i].mesh);

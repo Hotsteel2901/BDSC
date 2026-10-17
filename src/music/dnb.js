@@ -176,6 +176,11 @@ export class DnBEngine {
     this._pink = audio.noisePink;
     this._riser = null;
     this._lastChord = null;
+    // Finished voices are disconnected from the bus instead of accumulating
+    // for the whole session (a 3-minute set otherwise leaves thousands of
+    // live GainNodes routed to the music bus).
+    this._cleanup = [];
+    this._needsResync = true;
   }
 
   setTrack(idOrIndex) {
@@ -199,6 +204,8 @@ export class DnBEngine {
     if (this.playing) return;
     this.playing = true;
     this._nextTime = this.ctx.currentTime + 0.06;
+    this._needsResync = true;
+    if (this._timer) clearInterval(this._timer);
     this._timer = setInterval(() => this._schedule(), this._interval);
   }
   stop() {
@@ -206,13 +213,36 @@ export class DnBEngine {
     if (this._timer) clearInterval(this._timer);
     this._timer = null;
     if (this._riser) { try { this._riser.stop(); } catch (e) {} this._riser = null; }
+    // Release every voice still queued for teardown.
+    for (const item of this._cleanup) for (const node of item.nodes) { try { node.disconnect(); } catch (e) { /* gone */ } }
+    this._cleanup.length = 0;
+  }
+
+  _disconnectExpired() {
+    const now = this.ctx.currentTime;
+    let n = 0;
+    while (n < this._cleanup.length && this._cleanup[n].at <= now) {
+      const item = this._cleanup[n++];
+      for (const node of item.nodes) { try { node.disconnect(); } catch (e) { /* gone */ } }
+    }
+    if (n) this._cleanup.splice(0, n);
   }
   setIntensity(v) { this.intensity = Math.max(0.4, Math.min(1.6, v)); }
 
   _schedule() {
     if (!this.playing) return;
+    this._disconnectExpired();
+    // A backgrounded tab or a suspended AudioContext lets the scheduler fall
+    // far behind. Replaying the whole missed interval at once is what made the
+    // music (and the shared output graph) choke; skip ahead instead.
+    if (this.ctx.state !== 'running') { this._needsResync = true; return; }
     const now = this.ctx.currentTime;
-    while (this._nextTime < now + this._lookahead) {
+    if (this._needsResync || this._nextTime < now - 0.15) {
+      this._nextTime = now + 0.04;
+      this._needsResync = false;
+    }
+    let guard = 0;
+    while (this._nextTime < now + this._lookahead && guard++ < 12) {
       this._playStep(this._step, this._nextTime);
       this._nextTime += this.stepDuration;
       this._step = (this._step + 1) % 64;
@@ -303,9 +333,12 @@ export class DnBEngine {
   _out(t, gain, pan = 0) {
     const g = this.ctx.createGain();
     g.gain.value = gain;
+    const nodes = [g];
     let node = g;
-    if (pan) { const p = this.ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); node = p; }
+    if (pan) { const p = this.ctx.createStereoPanner(); p.pan.value = pan; g.connect(p); node = p; nodes.push(p); }
     node.connect(this._masterGain);
+    // Longest music voice (pad) is ~1.5 s; 2.6 s is a safe teardown delay.
+    this._cleanup.push({ at: Math.max(this.ctx.currentTime, t) + 2.6, nodes });
     return g;
   }
 

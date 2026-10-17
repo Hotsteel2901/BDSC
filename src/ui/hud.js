@@ -41,6 +41,7 @@ export class HUD {
     const hud = document.createElement('div');
     hud.id = 'hud';
     hud.innerHTML = `
+      <div id="dmgflash"></div>
       <div id="scope"><div class="lens"><div class="ticks-v"></div><div class="ticks-h"></div><div class="dot"></div></div></div>
       <div class="hud-tl" id="hud-tl"></div>
       <div class="hud-tr" id="hud-tr"></div>
@@ -49,13 +50,14 @@ export class HUD {
       <div class="hud-br" id="hud-br"></div>
       <div id="crosshair">+</div>
       <div id="hitmark">✕</div>
-      <div id="dmgflash"></div>
       <div id="toast"></div>
       <div id="killfeed"></div>
       <div id="objective"></div>
       <div id="netstat"></div>
       <div id="quickbar"></div>
       <div id="statuschips"></div>
+      <div id="grenade-charge"><div class="track"><div class="fill"></div></div><span class="lbl"></span></div>
+      <div id="enter-hint"></div>
       <canvas id="minimap" width="180" height="180"></canvas>
       <div id="pause"><div class="panel"><h2 style="letter-spacing:6px;color:var(--accent)" data-i18n="pause.title">PAUSED</h2>
         <div class="hint" style="margin:12px 0" data-i18n="pause.hint">Click RESUME to re-capture the mouse.</div>
@@ -149,7 +151,7 @@ export class HUD {
           <label class="field"><span data-i18n="menu.fun">${t('menu.fun')}</span><input type="checkbox" id="in-fun"></label>
         </div>
         <div class="row">
-          <label class="field" style="flex:1"><span data-i18n="menu.cell">${t('menu.cell')}</span> <input type="range" id="in-char" min="6" max="20" value="12"></label>
+          <label class="field" style="flex:1"><span data-i18n="menu.cell">${t('menu.cell')}</span> <input type="range" id="in-char" min="6" max="20" value="14"></label>
           <label class="field" style="flex:1"><span data-i18n="menu.music">${t('menu.music')}</span> <input type="range" id="in-music" min="0" max="1" step="0.05" value="0.7"></label>
           <label class="field" style="flex:1"><span data-i18n="menu.sfx">${t('menu.sfx')}</span> <input type="range" id="in-sfx" min="0" max="1" step="0.05" value="0.9"></label>
         </div>
@@ -308,6 +310,24 @@ export class HUD {
     const qbe = this.hud.querySelector('#quickbar');
     if (qbe) qbe.innerHTML = qb;
 
+    // grenade charge meter
+    const gc = this.hud.querySelector('#grenade-charge');
+    if (gc) {
+      const charging = !!game.grenadeCharging;
+      gc.classList.toggle('on', charging);
+      gc.classList.toggle('full', (game.grenadeCharge || 0) >= 0.999);
+      gc.querySelector('.fill').style.width = Math.round((game.grenadeCharge || 0) * 100) + '%';
+      gc.querySelector('.lbl').textContent = t('hud.grenadeCharge');
+    }
+
+    // nearby building entrance hint
+    const eh = this.hud.querySelector('#enter-hint');
+    if (eh) {
+      const b = game.nearEntrance;
+      eh.classList.toggle('on', !!b);
+      if (b) eh.innerHTML = t('hud.entrance', { n: b.detailFloors || 1 });
+    }
+
     // status chips
     const chips = [];
     for (const k in p.statuses) { chips.push(`<div class="chip" style="border-color:${statusColor(k)}">${statusName(k)} <span class="t">${Math.ceil(p.statuses[k].t)}s</span></div>`); }
@@ -315,6 +335,11 @@ export class HUD {
     if (game.revealActive) chips.push(`<div class="chip" style="border-color:var(--accent2)">${t('hud.reveal', { mode: revealName(game.reveal.mode) })}</div>`);
     if (w.weapon.stats.melee && w._deflect > 0.01) {
       chips.push(`<div class="chip" style="border-color:var(--accent2)">${t('hud.parry')} ${Math.round(w._deflect * 100)}%</div>`);
+    } else if (w.weapon.stats.melee && w._meleeHold > 0.2) {
+      chips.push(`<div class="chip" style="opacity:.8">${t('hud.guardCharge', { s: Math.max(0, 5 - w._meleeHold).toFixed(1) })}</div>`);
+    }
+    if (w.weapon.stats.melee && w.meleeCombo > 0) {
+      chips.push(`<div class="chip" style="border-color:var(--warn);color:var(--warn)">${t('hud.combo', { n: w.meleeCombo })}</div>`);
     }
     const sce = this.hud.querySelector('#statuschips');
     if (sce) sce.innerHTML = chips.join('');
@@ -540,13 +565,26 @@ export class HUD {
     const B = 54;
     const n = Math.ceil(range / B) + 1;
     const bx0 = Math.round(px / B), bz0 = Math.round(pz / B);
+    // Block centres are i*BLOCK + BLOCK/2 (see world.js), not the grid lines.
+    const half = B / 2;
     ctx.fillStyle = 'rgba(55,255,139,0.10)';
     for (let i = -n; i <= n; i++) {
       for (let j = -n; j <= n; j++) {
-        const cx = (bx0 + i) * B, cz = (bz0 + j) * B;
+        const cx = (bx0 + i) * B + half, cz = (bz0 + j) * B + half;
         const sx = (cx - px) * scale + S / 2, sz = (cz - pz) * scale + S / 2;
         const pad = (54 - 14) * scale;
         ctx.fillRect(sx - pad / 2, sz - pad / 2, pad, pad);
+      }
+    }
+    // enterable-building doors: the most useful navigation hint on the map
+    if (game.world && game.world.enterables) {
+      ctx.fillStyle = 'rgba(77,224,255,0.95)';
+      for (const b of game.world.enterables.values()) {
+        if (b.doorX == null) continue;
+        const dx = (b.doorX - px) * scale + S / 2;
+        const dz = (b.doorZ - pz) * scale + S / 2;
+        if (dx < 0 || dz < 0 || dx > S || dz > S) continue;
+        ctx.fillRect(dx - 1.5, dz - 1.5, 3, 3);
       }
     }
     // enemies

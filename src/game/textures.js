@@ -240,11 +240,10 @@ export function makeCrateTexture(size = 256, seed = 21) {
 }
 
 /* ---------------- HOLO SIGN (emissive billboard) ---------------- */
-export function makeSignTexture(text = 'BDSC', w = 512, h = 128, color = '#37ff8b', seed = 31) {
+function drawSign(ctx, x0, y0, w, h, text, color, seed) {
   const rnd = rngFactory(seed);
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  const ctx = c.getContext('2d');
+  ctx.save();
+  ctx.translate(x0, y0);
   ctx.fillStyle = '#04070a'; ctx.fillRect(0, 0, w, h);
   ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.strokeRect(4, 4, w - 8, h - 8);
   ctx.fillStyle = color;
@@ -258,10 +257,59 @@ export function makeSignTexture(text = 'BDSC', w = 512, h = 128, color = '#37ff8
     ctx.fillStyle = `rgba(255,255,255,${rnd() * 0.08})`;
     ctx.fillRect(0, rnd() * h, w, 1);
   }
+  ctx.restore();
+}
+
+export function makeSignTexture(text = 'BDSC', w = 512, h = 128, color = '#37ff8b', seed = 31) {
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  drawSign(c.getContext('2d'), 0, 0, w, h, text, color, seed);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = SRGB;
   t.needsUpdate = true;
   return t;
+}
+
+const SIGN_VARIANTS = [
+  ['BDSC', '#37ff8b'], ['NEO-TOKYO', '#ff4d9e'], ['GRID', '#4de0ff'],
+  ['RAMEN', '#ffb000'], ['24/7', '#37ff8b'], ['NULLSEC', '#ff5555'],
+  ['TERMINAL', '#4de0ff'], ['HOLLOW', '#ff4d9e'],
+];
+
+/**
+ * A single atlas for every holo sign in the city. Signs are the most numerous
+ * transparent quads in the world; one atlas lets a whole chunk's signs merge
+ * into a single draw call instead of one mesh + texture per sign.
+ */
+export function makeSignAtlas(cellW = 512, cellH = 128) {
+  const cols = 4, rows = 2;
+  const c = document.createElement('canvas');
+  c.width = cols * cellW; c.height = rows * cellH;
+  const ctx = c.getContext('2d');
+  for (let i = 0; i < SIGN_VARIANTS.length; i++) {
+    const [text, color] = SIGN_VARIANTS[i];
+    const x = (i % cols) * cellW, y = Math.floor(i / cols) * cellH;
+    drawSign(ctx, x, y, cellW, cellH, text, color, 101 + i * 37);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = SRGB;
+  tex.minFilter = THREE.LinearMipmapLinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.generateMipmaps = true;
+  tex.anisotropy = 4;
+  tex.needsUpdate = true;
+  return {
+    texture: tex,
+    cols, rows,
+    uvFor(seed) {
+      const i = Math.abs(seed | 0) % (cols * rows);
+      const col = i % cols, row = Math.floor(i / cols);
+      const u0 = col / cols, u1 = (col + 1) / cols;
+      // canvas rows are top-down; texture V is bottom-up
+      const v0 = 1 - (row + 1) / rows, v1 = 1 - row / rows;
+      return [u0, v0, u1, v1];
+    },
+  };
 }
 
 /* ---------------- INTERIOR WALL / FLOOR ---------------- */

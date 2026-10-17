@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { createMaterials } from './materials.js';
 import { GeometryBuilder, addBox, addWalls, addTop, generateBuilding, buildInterior } from './buildings.js';
-import { makeSignTexture, makeSkyTexture, makeHazardTexture, rngFactory } from './textures.js';
+import { makeSignAtlas, makeSkyTexture, rngFactory } from './textures.js';
 
 // ---------------------------------------------------------------------------
 // City metrics
@@ -118,6 +118,12 @@ export class World {
     this.colliderHash = new SpatialHash(12);
     this.lampHash = new SpatialHash(32);
     this.signGroup = new THREE.Group();
+    // Every sign in the city shares one atlas + material; each chunk batches
+    // its signs into a single mesh (one draw call instead of dozens).
+    this.signAtlas = makeSignAtlas();
+    this.signMaterial = new THREE.MeshBasicMaterial({
+      map: this.signAtlas.texture, transparent: true, toneMapped: false,
+    });
     this.propGroup = new THREE.Group();
     this.scene.add(this.signGroup);
     this.scene.add(this.propGroup);
@@ -129,6 +135,7 @@ export class World {
     this.pendingSpawns = [];
     this.onChunkLoad = null;
     this.onChunkUnload = null;
+    this.onInteriorVisible = null;
     this.stats = { chunks: 0, colliders: 0, buildings: 0 };
 
     this._setupSky();
@@ -145,15 +152,15 @@ export class World {
   }
 
   _setupLighting() {
-    const hemi = new THREE.HemisphereLight(0x8499c8, 0x3a3028, 2.3);
+    const hemi = new THREE.HemisphereLight(0x8499c8, 0x3a3028, 2.5);
     this.scene.add(hemi);
-    const ambient = new THREE.AmbientLight(0x40506e, 0.95);
+    const ambient = new THREE.AmbientLight(0x40506e, 1.15);
     this.scene.add(ambient);
     const moon = new THREE.DirectionalLight(0xdce6ff, 2.9);
     moon.position.set(-0.4, 1, 0.3).multiplyScalar(200);
     moon.castShadow = false;
     this.scene.add(moon);
-    const fill = new THREE.DirectionalLight(0xffb070, 0.95);
+    const fill = new THREE.DirectionalLight(0xffb070, 1.1);
     fill.position.set(0.6, 0.4, -0.7).multiplyScalar(200);
     this.scene.add(fill);
     this.hemi = hemi;
@@ -215,6 +222,20 @@ export class World {
     }
     this._updateLightPool(camPos);
     this._updateBeacons(camPos);
+    this._updateInteriorVisibility(camPos);
+  }
+
+  /** Show only the interiors whose building is close enough to matter. */
+  _updateInteriorVisibility(camPos) {
+    for (const ch of this.chunks.values()) if (ch.interiorGroup) ch.interiorGroup.visible = false;
+    for (const b of this.enterables.values()) {
+      const dx = b.x - camPos.x, dz = b.z - camPos.z;
+      if (dx * dx + dz * dz < 85 * 85) {
+        const ch = this.chunks.get(b.chunkKey);
+        if (ch && ch.interiorGroup) ch.interiorGroup.visible = true;
+        if (this.onInteriorVisible) this.onInteriorVisible(b);
+      }
+    }
   }
 
   _loadChunk(cx, cz) {
@@ -226,6 +247,9 @@ export class World {
       lamps: [],
       enterables: [],
       facadeCount: this.materials.facades.length,
+      // Guarantee at least one enterable interior in every streamed chunk so
+      // the interior content is discoverable instead of statistically rare.
+      forceEnterOnce: true,
     };
     const rng = rngFactory(((cx * 73856093) ^ (cz * 19349663) ^ 0x9e3779b9) >>> 0);
 
@@ -245,57 +269,89 @@ export class World {
       }
     }
 
-    // Build interiors for enterable buildings found in this chunk
+    // Build interiors for enterable buildings found in this chunk. They live in
+    // a separate mesh group that is only shown when the player is near one of
+    // its doors: an interior is never visible from the street, so rendering it
+    // with every loaded chunk is pure waste.
     const enterableKeys = [];
+    const intParts = { byMat: {}, colliders: [], props: [], signs: [], lamps: [] };
+    // Cap detailed interiors per chunk; four is already a lot of explorable
+    // floor space and keeps chunk generation / memory bounded.
     for (const b of parts.enterables) {
       const meta = this._enterMeta(b, rng);
-      buildInterior(rng, parts, meta);
+      meta.cx = cx; meta.cz = cz; meta.chunkKey = key(cx, cz);
+      buildInterior(rng, intParts, meta);
       const entryKey = meta.bx + ',' + meta.bz;
       this.enterables.set(entryKey, meta);
       enterableKeys.push(entryKey);
     }
 
     // merge per-material into meshes
+    const mats = this.materials;
+    const merge = (src, group) => {
+      for (const k in src.byMat) {
+        const gb = src.byMat[k];
+        if (gb.isEmpty()) continue;
+        const geo = gb.toGeometry();
+        let mat;
+        if (k.startsWith('facade')) mat = mats.facades[parseInt(k.slice(6), 10) % mats.facades.length];
+        else mat = mats[k] || mats.concrete;
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.frustumCulled = true;
+        mesh.matrixAutoUpdate = false;
+        mesh.updateMatrix();
+        group.add(mesh);
+      }
+    };
     const group = new THREE.Group();
     group.matrixAutoUpdate = false;
-    const mats = this.materials;
-    for (const k in parts.byMat) {
-      const gb = parts.byMat[k];
-      if (gb.isEmpty()) continue;
-      const geo = gb.toGeometry();
-      let mat;
-      if (k.startsWith('facade')) mat = mats.facades[parseInt(k.slice(6), 10) % mats.facades.length];
-      else mat = mats[k] || mats.concrete;
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.frustumCulled = true;
-      mesh.matrixAutoUpdate = false;
-      mesh.updateMatrix();
-      group.add(mesh);
-    }
+    merge(parts, group);
+    const interiorGroup = new THREE.Group();
+    interiorGroup.matrixAutoUpdate = false;
+    interiorGroup.visible = false;
+    merge(intParts, interiorGroup);
 
-    // colliders
-    for (const c of parts.colliders) {
+    // colliders (interiors always collide, even while hidden)
+    const allColliders = parts.colliders.concat(intParts.colliders);
+    for (const c of allColliders) {
       this.colliderHash.insertBox(c);
     }
 
-    // lamp positions
+    // lamp positions (street + interior)
+    const allLamps = (parts.lamps || []).concat(intParts.lamps || []);
     const lampBoxes = [];
-    for (const l of parts.lamps) {
+    for (const l of allLamps) {
       const box = { min: new THREE.Vector3(l.x, l.y, l.z), max: new THREE.Vector3(l.x, l.y, l.z), lamp: true, color: l.color, intensity: l.intensity, range: l.range };
       this.lampHash.insertBox(box);
       lampBoxes.push(box);
     }
 
-    // signs (individual meshes with textures)
+    // signs — batched into one atlas-mapped mesh per chunk
     const signs = [];
-    for (const s of parts.signs) {
-      const tex = makeSignTexture(pickSignText(s.seed), 512, 128, pickSignColor(s.seed), s.seed);
-      const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, toneMapped: false });
-      const mesh = new THREE.Mesh(new THREE.PlaneGeometry(s.w, s.h), mat);
-      mesh.position.set(s.x, s.y, s.z);
-      mesh.rotation.y = s.ry;
-      mesh.userData.sign = true;
-      mesh.userData.flicker = 0.4 + rng();
+    if (parts.signs.length) {
+      const pos = [], uv = [], idx = [];
+      let base = 0;
+      for (const s of parts.signs) {
+        const [u0, v0, u1, v1] = this.signAtlas.uvFor(s.seed);
+        const cos = Math.cos(s.ry), sin = Math.sin(s.ry);
+        const hw = s.w / 2, hh = s.h / 2;
+        const corners = [[-hw, -hh, u0, v0], [hw, -hh, u1, v0], [hw, hh, u1, v1], [-hw, hh, u0, v1]];
+        for (const [lx, ly, u, v] of corners) {
+          pos.push(s.x + lx * cos, s.y + ly, s.z - lx * sin);
+          uv.push(u, v);
+        }
+        idx.push(base, base + 1, base + 2, base, base + 2, base + 3);
+        base += 4;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      geo.setIndex(idx);
+      geo.computeBoundingSphere();
+      const mesh = new THREE.Mesh(geo, this.signMaterial);
+      mesh.matrixAutoUpdate = false;
+      mesh.updateMatrix();
+      mesh.userData.signBatch = true;
       this.signGroup.add(mesh);
       signs.push(mesh);
     }
@@ -316,9 +372,13 @@ export class World {
       }
     }
 
-    const ch = { cx, cz, group, colliders: parts.colliders, lampBoxes, signs, beacons, enterableKeys, buildings };
+    const ch = {
+      cx, cz, group, interiorGroup, colliders: allColliders, lampBoxes, signs, beacons,
+      enterableKeys, buildings,
+    };
     this.chunks.set(key(cx, cz), ch);
     this.scene.add(group);
+    this.scene.add(interiorGroup);
     this.stats.chunks = this.chunks.size;
     this.stats.buildings += buildings;
     this.stats.colliders = this.colliderHash.map.size;
@@ -334,12 +394,14 @@ export class World {
     if (this.onChunkUnload) this.onChunkUnload(ch.cx, ch.cz);
     this.scene.remove(ch.group);
     ch.group.traverse((o) => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
+    if (ch.interiorGroup) {
+      this.scene.remove(ch.interiorGroup);
+      ch.interiorGroup.traverse((o) => { if (o.isMesh && o.geometry) o.geometry.dispose(); });
+    }
     for (const c of ch.colliders) this.colliderHash.removeBox(c);
     for (const box of ch.lampBoxes) this.lampHash.removeBox(box);
     for (const s of ch.signs) {
       s.geometry.dispose();
-      if (s.material.map) s.material.map.dispose();
-      s.material.dispose();
       this.signGroup.remove(s);
     }
     for (const b of ch.beacons) {
@@ -387,6 +449,16 @@ export class World {
     // kerb collider (low)
     parts.colliders.push(boxCollider(cx, 0, cz, pad, kh, pad, 'sidewalk'));
 
+    // Glowing curb strips: they outline every block in the ASCII pass, so the
+    // street network reads instantly instead of dissolving into dark glyphs.
+    const curbKey = rng() < 0.5 ? 'neonCyan' : (rng() < 0.5 ? 'neonAmber' : 'neonPink');
+    const curb = this._builder(parts, curbKey);
+    const ey = 0.195;
+    addBox(curb, cx, ey, cz + pad / 2 - 0.28, pad - 0.9, 0.035, 0.07, 1, new THREE.Color(1, 1, 1));
+    addBox(curb, cx, ey, cz - pad / 2 + 0.28, pad - 0.9, 0.035, 0.07, 1, new THREE.Color(1, 1, 1));
+    addBox(curb, cx + pad / 2 - 0.28, ey, cz, 0.07, 0.035, pad - 0.9, 1, new THREE.Color(1, 1, 1));
+    addBox(curb, cx - pad / 2 + 0.28, ey, cz, 0.07, 0.035, pad - 0.9, 1, new THREE.Color(1, 1, 1));
+
     // district type
     const districtRnd = rng();
     let buildings = 0;
@@ -421,22 +493,41 @@ export class World {
       const tallBias = Math.max(0, 1 - Math.min(1, distCentre));
       const maxFloors = Math.round(4 + tallBias * 46 + rng() * 12);
       const minFloors = 2 + Math.floor(rng() * 3);
-      if (parts.wantEnterable === undefined) parts.wantEnterable = rng() < 0.2;
+      if (parts.wantEnterable === undefined) parts.wantEnterable = rng() < 0.62;
 
+      const buildingMetas = [];
+      let forced = false;
       for (const lot of lots) {
+        const dx = lot.x - cx, dz = lot.z - cz;
+        // Face the door outward, away from the neighbouring lot, so entrances
+        // are reachable from the street instead of opening into another block.
+        const doorSide = (Math.abs(dx) > Math.abs(dz))
+          ? (dx < 0 ? 3 : 2)
+          : (Math.abs(dz) > 0.001 ? (dz < 0 ? 1 : 0) : Math.floor(rng() * 4));
+        // Decide enterability *before* generating the shell. If we only capped
+        // the interiors after the fact, a building could keep its cut doorway
+        // with no walls/floors inside (an empty, non-colliding shell).
+        const canEnter = (parts.enterables ? parts.enterables.length : 0) < 4;
+        const forceEnter = !!parts.forceEnterOnce && !forced && canEnter;
+        if (forceEnter) forced = true;
         const meta = generateBuilding(rng, parts, {
           x: lot.x, z: lot.z,
           maxW: lot.w * 0.94, maxD: lot.d * 0.94,
           minFloors, maxFloors,
-          allowEnter: parts.wantEnterable,
-          forceEnter: false,
+          allowEnter: parts.wantEnterable && canEnter,
+          forceEnter,
+          doorSide,
         });
+        buildingMetas.push(meta);
         buildings++;
       }
+      if (forced) parts.forceEnterOnce = false;
+      this._addStreetProps(parts, rng, cx, cz, pad, street, concrete, metal, buildingMetas);
+      return buildings;
     }
 
     // ---- street props around the block ----
-    this._addStreetProps(parts, rng, cx, cz, pad, street, concrete, metal);
+    this._addStreetProps(parts, rng, cx, cz, pad, street, concrete, metal, []);
     return buildings;
   }
 
@@ -444,30 +535,108 @@ export class World {
     const concrete = this._builder(parts, 'concrete');
     const metal = this._builder(parts, 'metal');
     const walk = this._builder(parts, 'sidewalk');
-    // central fountain / monument
-    const r = 2 + rng() * 2;
-    addBox(concrete, cx, 0.18, cz, r * 2, 0.8, r * 2, 3, new THREE.Color(0.8, 0.82, 0.85));
-    parts.colliders.push(boxCollider(cx, 0.18, cz, r * 2, 0.8, r * 2, 'prop'));
-    // benches
-    for (let i = 0; i < 4 + Math.floor(rng() * 6); i++) {
-      const bx = cx + (rng() - 0.5) * (pad - 4);
-      const bz = cz + (rng() - 0.5) * (pad - 4);
-      addBox(concrete, bx, 0.18, bz, 1.8, 0.5, 0.6, 2, new THREE.Color(0.7, 0.6, 0.5));
-      parts.colliders.push(boxCollider(bx, 0.18, bz, 1.8, 0.5, 0.6, 'prop'));
+    const glass = this._builder(parts, 'glassEmissive');
+    const neon = this._builder(parts, 'neonPink');
+
+    // pale stone paths crossing the plaza
+    const pathCol = new THREE.Color(0.9, 0.92, 0.98);
+    addTop(walk, cx, 0.185, cz, pad * 0.92, 3.4, 8, pathCol);
+    addTop(walk, cx, 0.186, cz, 3.4, pad * 0.92, 8, pathCol);
+
+    // ---- central fountain / monument ----
+    const fr = 3.6;
+    const rimCol = new THREE.Color(0.75, 0.78, 0.82);
+    addBox(concrete, cx, 0.18, cz + fr, fr * 2 + 0.5, 0.55, 0.5, 2, rimCol);
+    addBox(concrete, cx, 0.18, cz - fr, fr * 2 + 0.5, 0.55, 0.5, 2, rimCol);
+    addBox(concrete, cx + fr, 0.18, cz, 0.5, 0.55, fr * 2 + 0.5, 2, rimCol);
+    addBox(concrete, cx - fr, 0.18, cz, 0.5, 0.55, fr * 2 + 0.5, 2, rimCol);
+    addBox(glass, cx, 0.6, cz, fr * 2 - 0.3, 0.07, fr * 2 - 0.3, 2, new THREE.Color(0.22, 0.55, 0.85));
+    parts.colliders.push(boxCollider(cx, 0.18, cz, fr * 2 + 0.5, 0.55, fr * 2 + 0.5, 'prop'));
+    // monument shaft + neon rings
+    addBox(metal, cx, 0.6, cz, 1.0, 4.2, 1.0, 2, new THREE.Color(0.35, 0.38, 0.42));
+    addBox(neon, cx, 2.2, cz, 1.15, 0.09, 1.15, 1, new THREE.Color(1, 1, 1));
+    addBox(neon, cx, 3.4, cz, 1.12, 0.07, 1.12, 1, new THREE.Color(1, 1, 1));
+    addBox(glass, cx, 4.85, cz, 0.55, 0.4, 0.55, 1, new THREE.Color(0.6, 0.9, 1));
+    parts.props.push({ type: 'beacon', x: cx, y: 4.6, z: cz, color: 0xff4d9e });
+    parts.signs = parts.signs || [];
+    parts.signs.push({ x: cx, y: 3.05, z: cz + 1.2, w: 2.4, h: 0.55, ry: 0, seed: Math.floor(cx * 13 + cz * 7) & 0x7fffffff });
+
+    // benches ringing the fountain
+    const benchPos = [[0, fr + 2.6, 2.0, 0.6], [0, -(fr + 2.6), 2.0, 0.6], [fr + 2.6, 0, 0.6, 2.0], [-(fr + 2.6), 0, 0.6, 2.0]];
+    for (const [bx, bz, bw, bd] of benchPos) {
+      addBox(concrete, cx + bx, 0.18, cz + bz, bw, 0.45, bd, 2, new THREE.Color(0.65, 0.55, 0.42));
+      parts.colliders.push(boxCollider(cx + bx, 0.18, cz + bz, bw, 0.45, bd, 'prop'));
     }
-    // trees (low-poly: trunk + foliage box)
-    for (let i = 0; i < 3 + Math.floor(rng() * 5); i++) {
-      const tx = cx + (rng() - 0.5) * (pad - 4);
-      const tz = cz + (rng() - 0.5) * (pad - 4);
-      addBox(metal, tx, 0.18, tz, 0.5, 3, 0.5, 1, new THREE.Color(0.4, 0.3, 0.2));
-      addBox(parts.byMat['concrete'] || (parts.byMat['concrete'] = new GeometryBuilder()), tx, 3, tz, 2.4, 2.2, 2.4, 2, new THREE.Color(0.2, 0.5, 0.25));
-      parts.colliders.push(boxCollider(tx, 0.18, tz, 0.6, 6, 0.6, 'prop'));
+
+    // planters / trees in the open quadrants
+    for (let i = 0; i < 4 + Math.floor(rng() * 4); i++) {
+      const ang = (i / 7) * Math.PI * 2 + rng() * 0.5;
+      const rad = fr + 4 + rng() * (pad * 0.28);
+      const tx = cx + Math.cos(ang) * rad;
+      const tz = cz + Math.sin(ang) * rad;
+      if (Math.abs(tx - cx) > pad / 2 - 3 || Math.abs(tz - cz) > pad / 2 - 3) continue;
+      addBox(concrete, tx, 0.18, tz, 1.4, 0.55, 1.4, 2, new THREE.Color(0.38, 0.4, 0.36));
+      addBox(metal, tx, 0.7, tz, 0.45, 3.0, 0.45, 1, new THREE.Color(0.35, 0.26, 0.18));
+      addBox(concrete, tx, 2.4, tz, 2.3, 2.0, 2.3, 2, new THREE.Color(0.18, 0.48, 0.26));
+      parts.colliders.push(boxCollider(tx, 0.18, tz, 1.4, 2.6, 1.4, 'prop'));
     }
-    parts.colliders.push(boxCollider(cx, 0, cz, pad, 0.18, pad, 'sidewalk'));
+
+    // four corner lamps (they also feed the moving point-light pool)
+    const lx = pad / 2 - 1.4;
+    const lampCol = new THREE.Color(0.9, 0.92, 0.95);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) this._addLamp(parts, cx + sx * lx, cz + sz * lx, lampCol);
+
+    // market stalls on two sides
+    for (let i = 0; i < 2; i++) {
+      const side = Math.floor(rng() * 4);
+      const off = (rng() - 0.5) * (pad - 10);
+      let sx = cx, sz = cz;
+      if (side === 0) sz = cz + pad / 2 - 3.2;
+      else if (side === 1) sz = cz - pad / 2 + 3.2;
+      else if (side === 2) sx = cx + pad / 2 - 3.2;
+      else sx = cx - pad / 2 + 3.2;
+      if (side < 2) sx = cx + off; else sz = cz + off;
+      addBox(metal, sx, 0.18, sz, 2.4, 0.9, 1.4, 2, new THREE.Color(0.5, 0.52, 0.56));
+      addBox(neon, sx, 1.14, sz, 2.5, 0.07, 1.5, 1, new THREE.Color(1, 1, 1));
+      addBox(concrete, sx, 2.2, sz, 2.7, 0.14, 1.7, 2, new THREE.Color(0.3, 0.3, 0.35));
+      addBox(metal, sx - 1.1, 1.1, sz, 0.08, 2.2, 0.08, 1, new THREE.Color(0.4, 0.4, 0.45));
+      addBox(metal, sx + 1.1, 1.1, sz, 0.08, 2.2, 0.08, 1, new THREE.Color(0.4, 0.4, 0.45));
+      parts.colliders.push(boxCollider(sx, 0.18, sz, 2.4, 1.1, 1.4, 'prop'));
+    }
   }
 
-  _addStreetProps(parts, rng, cx, cz, pad, street, concrete, metal) {
-    // lamps at block corners
+  _addStreetProps(parts, rng, cx, cz, pad, street, concrete, metal, metas = []) {
+    const walk = this._builder(parts, 'sidewalk');
+    const dark = this._builder(parts, 'metal');
+    const glass = this._builder(parts, 'glassEmissive');
+    const neon = this._builder(parts, 'neonCyan');
+    const placed = [];
+    const inside = (x, z, margin) => metas.some((b) => Math.abs(x - b.x) < b.w / 2 + margin && Math.abs(z - b.z) < b.d / 2 + margin);
+    const atDoor = (x, z, radius) => metas.some((b) => b.doorX != null && Math.hypot(x - b.doorX, z - b.doorZ) < radius);
+    const free = (x, z, m = 1.0) => !inside(x, z, m) && !atDoor(x, z, m + 2.2) && !placed.some(p => Math.hypot(p.x - x, p.z - z) < p.r + m);
+    const spot = (m = 1.0, edge = 0) => {
+      for (let i = 0; i < 16; i++) {
+        const x = cx + (rng() - 0.5) * (pad - 2.4 - edge);
+        const z = cz + (rng() - 0.5) * (pad - 2.4 - edge);
+        if (free(x, z, m)) return { x, z };
+      }
+      return null;
+    };
+    // Curbside placement keeps street furniture visible from the road instead
+    // of randomly burying it in the last sliver of sidewalk behind a tower.
+    const edgeSpot = (m = 1.0) => {
+      for (let i = 0; i < 20; i++) {
+        const side = Math.floor(rng() * 4);
+        const t = (rng() - 0.5) * (pad - 7);
+        const off = pad / 2 - 1.35;
+        const x = side === 2 ? cx + off : side === 3 ? cx - off : cx + t;
+        const z = side === 0 ? cz + off : side === 1 ? cz - off : cz + t;
+        if (free(x, z, m)) return { x, z };
+      }
+      return spot(m);
+    };
+
+    // street lamps at the block corners + mid edges
     const corners = [
       [cx - pad / 2 + 1.2, cz - pad / 2 + 1.2],
       [cx + pad / 2 - 1.2, cz - pad / 2 + 1.2],
@@ -476,53 +645,110 @@ export class World {
     ];
     const lampCol = new THREE.Color(0.85, 0.88, 0.92);
     for (const [lx, lz] of corners) {
-      if (rng() < 0.15) continue;
+      if (rng() < 0.1) continue;
       this._addLamp(parts, lx, lz, lampCol);
     }
-    // mid-edge lamps on long blocks
-    if (rng() < 0.6) this._addLamp(parts, cx, cz - pad / 2 + 1.2, lampCol);
-    if (rng() < 0.6) this._addLamp(parts, cx, cz + pad / 2 - 1.2, lampCol);
+    if (rng() < 0.7) this._addLamp(parts, cx, cz - pad / 2 + 1.2, lampCol);
+    if (rng() < 0.7) this._addLamp(parts, cx, cz + pad / 2 - 1.2, lampCol);
 
-    // traffic signal at one corner (emissive boxes)
-    if (rng() < 0.5) {
+    // traffic signal
+    if (rng() < 0.6) {
       const tx = cx + pad / 2 - 1.2, tz = cz - pad / 2 + 1.2;
       addBox(metal, tx, 0.18, tz, 0.3, 4.5, 0.3, 1, lampCol);
       addBox(metal, tx, 4.4, tz, 0.3, 0.9, 0.3, 1, lampCol);
       parts.props.push({ type: 'beacon', x: tx, y: 4.9, z: tz, color: 0xffcc00 });
     }
 
-    // trash bins / hydrants / barriers
-    for (let i = 0; i < 2 + Math.floor(rng() * 4); i++) {
-      const px = cx + (rng() - 0.5) * (pad - 2);
-      const pz = cz + (rng() - 0.5) * (pad - 2);
-      if (rng() < 0.5) {
-        addBox(concrete, px, 0.18, pz, 0.7, 1.1, 0.7, 1, new THREE.Color(0.35, 0.38, 0.4));
-        parts.colliders.push(boxCollider(px, 0.18, pz, 0.7, 1.1, 0.7, 'prop'));
+    // crates, bins, planters, benches, vending machines, dumpsters
+    const kinds = ['bin', 'planter', 'bench', 'vending', 'dumpster', 'crate', 'planter', 'bench'];
+    for (let i = 0; i < 4 + Math.floor(rng() * 5); i++) {
+      const kind = kinds[Math.floor(rng() * kinds.length)];
+      const p = edgeSpot(kind === 'bench' ? 1.4 : 1.0);
+      if (!p) continue;
+      const { x, z } = p;
+      if (kind === 'bin') {
+        addBox(concrete, x, 0.18, z, 0.7, 1.05, 0.7, 1, new THREE.Color(0.32, 0.36, 0.38));
+        addBox(dark, x, 1.25, z, 0.76, 0.1, 0.76, 1, new THREE.Color(0.2, 0.22, 0.24));
+        placed.push({ x, z, r: 0.8 });
+        parts.colliders.push(boxCollider(x, 0.18, z, 0.7, 1.15, 0.7, 'prop'));
+      } else if (kind === 'planter') {
+        addBox(concrete, x, 0.18, z, 1.2, 0.55, 1.2, 2, new THREE.Color(0.4, 0.42, 0.38));
+        addBox(concrete, x, 1.0, z, 1.7, 1.0, 1.7, 2, new THREE.Color(0.16, 0.42, 0.22));
+        placed.push({ x, z, r: 1.1 });
+        parts.colliders.push(boxCollider(x, 0.18, z, 1.2, 1.1, 1.2, 'prop'));
+      } else if (kind === 'bench') {
+        addBox(concrete, x, 0.18, z, 2.0, 0.42, 0.6, 2, new THREE.Color(0.62, 0.5, 0.38));
+        addBox(concrete, x, 0.62, z - 0.24, 2.0, 0.5, 0.12, 2, new THREE.Color(0.62, 0.5, 0.38));
+        placed.push({ x, z, r: 1.4 });
+        parts.colliders.push(boxCollider(x, 0.18, z, 2.0, 0.6, 0.6, 'prop'));
+      } else if (kind === 'vending') {
+        addBox(metal, x, 0.18, z, 0.95, 2.0, 0.8, 2, new THREE.Color(0.3, 0.34, 0.4));
+        addBox(glass, x, 1.2, z + 0.42, 0.7, 1.1, 0.04, 1, new THREE.Color(0.6, 0.9, 1));
+        addBox(neon, x, 1.98, z + 0.42, 0.8, 0.09, 0.05, 1, new THREE.Color(1, 1, 1));
+        placed.push({ x, z, r: 1.0 });
+        parts.colliders.push(boxCollider(x, 0.18, z, 0.95, 2.0, 0.8, 'prop'));
+      } else if (kind === 'dumpster') {
+        addBox(metal, x, 0.18, z, 1.9, 1.0, 1.0, 2, new THREE.Color(0.26, 0.34, 0.3));
+        addBox(dark, x, 1.2, z, 2.0, 0.12, 1.1, 1, new THREE.Color(0.18, 0.2, 0.22));
+        placed.push({ x, z, r: 1.4 });
+        parts.colliders.push(boxCollider(x, 0.18, z, 1.9, 1.2, 1.0, 'prop'));
       } else {
-        addBox(this._builder(parts, 'hazard'), px, 0.18, pz, 1.6, 0.9, 0.4, 1, new THREE.Color(1, 1, 1));
-        parts.colliders.push(boxCollider(px, 0.18, pz, 1.6, 0.9, 0.4, 'prop'));
+        const s = 0.8 + rng() * 0.7;
+        addBox(parts.byMat['crate'] || (parts.byMat['crate'] = new GeometryBuilder()), x, 0.18, z, s, s, s, 2, new THREE.Color(1, 1, 1));
+        placed.push({ x, z, r: s });
+        parts.colliders.push(boxCollider(x, 0.18, z, s, s, s, 'prop'));
       }
     }
 
-    // parked cars (simple low-poly) along the kerb
-    if (rng() < 0.5) {
+    // bus shelter
+    if (rng() < 0.35) {
+      const p = edgeSpot(2.2);
+      if (p) {
+        const { x, z } = p;
+        addBox(metal, x - 1.6, 0.18, z, 0.08, 2.6, 0.08, 1, lampCol);
+        addBox(metal, x + 1.6, 0.18, z, 0.08, 2.6, 0.08, 1, lampCol);
+        addBox(metal, x, 2.78, z, 3.4, 0.1, 1.5, 2, new THREE.Color(0.3, 0.32, 0.36));
+        addBox(glass, x, 1.6, z - 0.68, 3.2, 1.5, 0.05, 1, new THREE.Color(0.55, 0.8, 1));
+        addBox(concrete, x, 0.6, z + 0.3, 2.8, 0.1, 0.45, 2, new THREE.Color(0.5, 0.55, 0.6));
+        placed.push({ x, z, r: 2.2 });
+        parts.colliders.push(boxCollider(x - 1.6, 0.18, z, 0.2, 2.6, 0.2, 'prop'));
+        parts.colliders.push(boxCollider(x + 1.6, 0.18, z, 0.2, 2.6, 0.2, 'prop'));
+      }
+    }
+
+    // parked cars along the kerb (proper low-poly car, not a bare box)
+    if (rng() < 0.6) {
       const n = 1 + Math.floor(rng() * 3);
       for (let i = 0; i < n; i++) {
         const side = Math.floor(rng() * 4);
-        const t = (rng() - 0.5) * (pad - 4);
+        const t = (rng() - 0.5) * (pad - 6);
         let px, pz, carW, carD;
-        if (side === 0) { px = cx + t; pz = cz + pad / 2 - 0.9; carW = 4.2; carD = 2.0; }
-        else if (side === 1) { px = cx + t; pz = cz - pad / 2 + 0.9; carW = 4.2; carD = 2.0; }
-        else if (side === 2) { px = cx + pad / 2 - 0.9; pz = cz + t; carW = 2.0; carD = 4.2; }
-        else { px = cx - pad / 2 + 0.9; pz = cz + t; carW = 2.0; carD = 4.2; }
-        const col = new THREE.Color().setHSL(rng(), 0.5, 0.35 + rng() * 0.2);
-        addBox(this._builder(parts, 'concrete'), px, 0.3, pz, carW, 0.9, carD, 2, col);
-        addBox(this._builder(parts, 'windowPane'), px, 1.15, pz, carW * 0.7, 0.6, carD * 0.75, 1, new THREE.Color(0.2, 0.3, 0.4));
-        parts.colliders.push(boxCollider(px, 0.3, pz, carW, 1.4, carD, 'prop'));
+        if (side === 0) { px = cx + t; pz = cz + pad / 2 - 1.0; carW = 4.2; carD = 2.0; }
+        else if (side === 1) { px = cx + t; pz = cz - pad / 2 + 1.0; carW = 4.2; carD = 2.0; }
+        else if (side === 2) { px = cx + pad / 2 - 1.0; pz = cz + t; carW = 2.0; carD = 4.2; }
+        else { px = cx - pad / 2 + 1.0; pz = cz + t; carW = 2.0; carD = 4.2; }
+        if (!free(px, pz, 1.6)) continue;
+        const col = new THREE.Color().setHSL(rng(), 0.45, 0.28 + rng() * 0.16);
+        const alongZ = carD > carW;
+        addBox(metal, px, 0.32, pz, carW, 0.55, carD, 2, col);
+        addBox(metal, px, 0.78, pz, carW * 0.82, 0.34, carD * 0.82, 2, col.clone().multiplyScalar(1.1));
+        addBox(glass, px, 1.02, pz, carW * 0.62, 0.38, carD * 0.6, 1, new THREE.Color(0.25, 0.35, 0.45));
+        // wheels
+        const wx = alongZ ? carW / 2 : carW / 3, wz = alongZ ? carD / 3 : carD / 2;
+        for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+          addBox(dark, px + sx * wx * 0.9, 0.18, pz + sz * wz * 0.7, 0.24, 0.36, 0.24, 1, new THREE.Color(0.08, 0.09, 0.1));
+        }
+        placed.push({ x: px, z: pz, r: 2.2 });
+        parts.colliders.push(boxCollider(px, 0.18, pz, carW, 1.1, carD, 'prop'));
       }
     }
 
-    // ground clutter: puddles (dark decals), debris
+    // ground clutter + puddles on the road
+    for (let i = 0; i < 3; i++) {
+      const x = cx + (rng() - 0.5) * (BLOCK - 2), z = cz + (rng() - 0.5) * (BLOCK - 2);
+      if (inside(x, z, 0.5) || Math.abs(x - cx) < pad / 2 + 1 || Math.abs(z - cz) < pad / 2 + 1) continue;
+      addTop(street, x, 0.025, z, 0.8 + rng() * 2.4, 0.5 + rng() * 1.6, 2, new THREE.Color(0.28, 0.36, 0.48));
+    }
   }
 
   _addLamp(parts, x, z, col) {
@@ -536,7 +762,7 @@ export class World {
     // head (emissive)
     addBox(lampMat, x + 1.8, baseY + 6.85, z, 0.8, 0.35, 0.5, 1, new THREE.Color(1, 1, 0.85));
     parts.colliders.push(boxCollider(x, baseY, z, 0.5, 7, 0.5, 'lamp'));
-    parts.lamps.push({ x: x + 1.8, y: baseY + 6.6, z, color: 0xffcc88, intensity: 16, range: 26 });
+    parts.lamps.push({ x: x + 1.8, y: baseY + 6.6, z, color: 0xffcc88, intensity: 42, range: 32 });
   }
 
   _updateLightPool(camPos) {
@@ -557,7 +783,7 @@ export class World {
       if (lamp) {
         l.position.set(lamp.min.x, lamp.min.y, lamp.min.z);
         l.color.setHex(lamp.color || 0xffcc88);
-        l.intensity = (lamp.intensity ?? 2.2) * 0.9;
+        l.intensity = (lamp.intensity ?? 2.2);
         l.distance = lamp.range ?? 22;
       } else {
         l.intensity = 0;
@@ -665,6 +891,24 @@ export class World {
     return new THREE.Vector3(x, 0.2, z);
   }
 
+  /**
+   * Pick a yaw that looks down the most open direction from `pos`. Used by the
+   * spawn logic so the player never starts nose-first into a facade.
+   */
+  openYaw(pos) {
+    let bestA = 0, bestD = -1;
+    const origin = new THREE.Vector3(pos.x, pos.y + 1.55, pos.z);
+    const dir = new THREE.Vector3();
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2;
+      dir.set(Math.cos(a), 0, Math.sin(a));
+      const hit = this.raycast(origin, dir, 80, (b) => b.tag === 'sidewalk');
+      const d = hit ? hit.distance : 80;
+      if (d > bestD) { bestD = d; bestA = a; }
+    }
+    return Math.atan2(-Math.cos(bestA), -Math.sin(bestA));
+  }
+
   /** Random street position within radius chunks of the player. */
   randomStreetNear(cx, cz, minR, maxR) {
     const ang = Math.random() * Math.PI * 2;
@@ -701,8 +945,3 @@ function boxCollider(cx, y0, cz, w, h, d, tag) {
     tag,
   };
 }
-
-const SIGN_WORDS = ['BDSC', 'NEO-TOKYO', 'GRID', 'NULLSEC', 'AXIOM', 'HOLLOW', 'CIRCUIT', 'RAIN', 'SECTOR-7', 'TERMINAL', 'NO ENTRY', '24/7', 'RAMEN', 'PLASMA', 'VOID'];
-const SIGN_COLORS = ['#37ff8b', '#ff4d9e', '#4de0ff', '#ffb000', '#ff5555'];
-function pickSignText(seed) { return SIGN_WORDS[Math.abs(seed) % SIGN_WORDS.length]; }
-function pickSignColor(seed) { return SIGN_COLORS[Math.abs((seed >> 3)) % SIGN_COLORS.length]; }

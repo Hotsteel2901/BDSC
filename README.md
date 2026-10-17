@@ -38,6 +38,7 @@ npm test             # headless Playwright smoke test (dev server must be runnin
 npm run test:net     # two-client multiplayer sync test
 npm run test:mobile  # touch controls / mobile layout acceptance
 npm run test:collision # collision regression (no wall/corner teleports)
+npm run test:regression # fun-mode leak, blade guard, grenade floor, ASCII, audio, stairs
 ```
 
 > The smoke tests use Playwright/Chromium. If it isn't installed: `npx playwright install chromium`.
@@ -56,15 +57,19 @@ npm run test:collision # collision regression (no wall/corner teleports)
 | Jump | `Space` |
 | Weapon | `1 2 3 4 5 6 7 8` (or mouse wheel) |
 | Reload | `R` |
-| Throw grenade | `G` |
+| Charge + throw grenade | Hold `G`, release (tap for a short lob) |
+| Guard / parry (TANG DAO) | Hold fire while braced |
 | Quick-use hotbar | `Z X C V B N M` |
 | Quick heal (best med item) | `Q` |
 | Inventory | `I` |
 | Arsenal / upgrades | Pause (`Esc`) → ARSENAL |
 
 Weapons: VECTOR-9 pistol, WASP SMG, PULSE AR, BREACH-12 shotgun, LANCE DMR sniper,
-ION CASTER plasma, HOUND RL rocket launcher, and the TANG DAO melee saber (hold fire
-to chain a three-swing combo; kills burst into flying debris).
+ION CASTER plasma, HOUND RL rocket launcher, and the TANG DAO melee saber. Hold fire
+to chain a three-swing combo (the third swing is a committed finisher). Keep holding
+after five seconds to settle into a **guard stance**: standing still while braced
+deflects incoming bullets with a visible energy ring; moving lowers the block chance.
+Kills burst into flying debris.
 
 ### Mobile / touch
 
@@ -91,11 +96,17 @@ unchanged.
 **1 — Detailed models with a unified ASCII aesthetic.**
 Every surface is drawn to a canvas at runtime (facade window grids, asphalt, brick,
 roof gravel, metal panels, crate stencils, hazard stripes, holo signs, interior walls).
-The whole scene is then resolved through a custom ASCII shader (`src/engine/ascii.js`)
-that converts luminance + Sobel edges into a density-ordered glyph ramp, tinting each
-character with the real scene colour. Building geometry is genuinely detailed — facades,
-spandrels, mullions, parapets, AC units, water tanks, antennas, billboards — all reduced
-to a single, consistent character grid.
+The whole scene is resolved through a custom ASCII shader (`src/engine/ascii.js`) that
+converts luminance + Sobel edges into a density-ordered glyph ramp, tinting each
+character with the real scene colour. The glyph grid is laid out in **screen pixels**
+(not the low-res scene target), so every character is rasterised at full display
+resolution; the glyph atlas is mipmapped and dark cells receive extra fill, which keeps
+unlit streets and interiors readable. Building geometry is genuinely detailed —
+facades, spandrels, ledges, neon corner strips, shopfronts, canopies, wall signs,
+parapets, AC units, water tanks, antennas, billboards — all reduced to one consistent
+character grid. Viewmodels, enemies, items and the co-op avatar are all multi-part
+models with procedural animation (walk cycles, aim tracking, recoil, guard stance,
+hit reactions, rotating rotors and a pitching turret barrel).
 
 **2 — No placeholders, no TODOs, no stubs.**
 Every listed system is implemented and exercised end-to-end and verified by the automated
@@ -128,14 +139,21 @@ particles, and multiplayer snapshot sync were all made green.
    chunks (block pitch 54 m, ~2 500 buildings per 81-chunk view, >860 m view distance;
    world coordinates are unbounded).
 2. **Refine heights & massing** — district density, plot subdivision (1–4 lots), stacked
-   setback segments, urban-centre height bias, towers up to ~60 floors.
-3. **Street furniture** — lamps, traffic signals with blinking beacons, holo signs,
-   benches, trees, bins, hazard barriers, parked cars, plazas.
-4. **Interiors without breaking structure** — enterable buildings keep their real shell;
-   a door gap is cut through the *exterior* facade and matching interior walls, and
-   detailed floors (up to 12 levels) with partitions, furniture, ceiling lights and a
-   working staircase + stairwell opening are added. Everything above stays a solid,
-   structurally-consistent mass so the tower silhouette never changes.
+   setback segments, urban-centre height bias, towers up to ~60 floors, ledges, corner
+   neon, AC/balcony boxes, shopfront glazing, awnings and batched holo-signs.
+3. **Street furniture** — lamps with real point-light pools, glowing curbs, traffic
+   signals with blinking beacons, benches, planters, trees, bins, vending machines,
+   dumpsters, bus shelters, hazard barriers, parked cars (with wheels and cabins), plazas
+   with fountains, monuments, market stalls and paths.
+4. **Interiors without breaking structure** — roughly one in three buildings is
+   enterable (at least one per streamed chunk), with an outward-facing, neon-framed
+   doorway, canopy, floor mat and lamp. A door gap is cut through the *exterior* facade
+   and matching interior walls; detailed floors (up to 8 levels) add partitions with
+   real doorways, furniture, monitors, server racks, lockers, utility pipes, ceiling
+   lights, a working switchback staircase + stairwell opening and a guard-rail. Interior
+   meshes are rendered only when the player is near the building — colliders stay live.
+   Everything above remains a solid, structure-preserving mass so the tower silhouette
+   never changes. Loot caches spawn on every interior floor.
 
 **10 — Music & SFX.** Six complete procedural Drum & Bass songs, all synthesised live
 (amen-style breaks, sub + reese bass, filtered pads, arps, risers). Every track is a
@@ -231,18 +249,22 @@ server/
   relay.js                optional self-hosted Aedes MQTT-over-WS relay
 test/
   smoke.mjs               headless gameplay smoke test (asserts 0 errors)
+  regression.mjs          fun-mode reset, parry, grenades, ASCII, audio, interiors
   net.mjs                 two-client multiplayer sync test
 ```
 
 ### How the ASCII rendering works
-1. The 3D scene renders into a half-float render target at **2× the character grid**.
+1. The 3D scene renders into a half-float render target at **6× the character grid**.
 2. A bright-pass gives a cheap bloom.
-3. The compose shader samples each cell, applies grade (contrast/saturation/brightness),
-   converts linear → sRGB, detects edges, picks a glyph from the ramp, samples the glyph
-   atlas, and tints it with the scene colour. A **cell fill** term paints a fraction of the
-   cell colour into the gaps between glyph strokes so the ASCII view keeps roughly the same
-   average brightness as the raw render instead of collapsing to black — plus light
-   scanlines, vignette, chromatic aberration, film grain and a damage overlay.
+3. The compose shader lays the glyph grid out in **screen space**, samples the scene at
+   each cell centre, applies grade (contrast/saturation/brightness → sRGB), detects
+   cell-scale edges, picks a glyph from the ramp (or an orientation glyph on strong
+   edges), samples the **mipmapped glyph atlas**, and tints it with the scene colour.
+   A brightness-aware **cell fill** term paints a fraction of the cell colour into the
+   gaps between glyph strokes (with extra lift in dark cells) so the ASCII view keeps
+   roughly the same average brightness as the raw render instead of collapsing to black
+   — plus restrained scanlines, vignette, chromatic aberration, film grain and a damage
+   overlay. The default cell is 14 px and can be tuned live.
 
 Tune it live from the menu: **ASCII CELL** size, **GLYPH RAMP** (CLEAN, TERMINAL or
 DENSE), **TINT** and **EDGE GLYPHS**. Prefer plain 3D? **ASCII RENDER** switches the whole
@@ -259,9 +281,14 @@ terminal aesthetic (subset to the glyphs the game actually uses; SIL OFL 1.1).
 
 ## Scope notes (honest limitations)
 
-- Interiors are detailed for up to **12 floors** per enterable building; the remainder of
+- Interiors are detailed for up to **8 floors** per enterable building; the remainder of
   each tower remains a solid, structure-preserving mass. This keeps memory and collider
-  counts sane while still delivering dozens of fully explorable multi-floor buildings.
+  counts sane while still delivering hundreds of fully explorable multi-floor buildings
+  around the player. Interior meshes are hidden until you are near the building.
+- Audio runs a leaky-bucket voice budget and a context/stall watchdog. Under a huge
+  horde, low-priority sounds are dropped instead of scheduling an unbounded graph; the
+  DnB scheduler skips missed time after a background-tab stall instead of replaying it
+  all at once. This is what prevents the "audio freezes after too many sounds" failure.
 - Multiplayer is host-authoritative. If the host disconnects, clients keep playing the
   frozen snapshot until you re-join.
 - The world is procedural and effectively unbounded, but only chunks within the streaming

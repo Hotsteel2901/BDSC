@@ -13,7 +13,8 @@
     "test:net": "node test/net.mjs",
     "test:systems": "node test/systems.mjs",
     "test:mobile": "node test/mobile.mjs",
-    "test:collision": "node test/collision.mjs"
+    "test:collision": "node test/collision.mjs",
+    "test:regression": "node test/regression.mjs"
   },
   "dependencies": {
     "aedes": "^1.2.0",

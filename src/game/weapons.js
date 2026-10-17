@@ -26,10 +26,10 @@ export class WeaponSystem {
     ctx.camera.add(this.viewRoot);
     // A short-range fill light so the procedural viewmodel always reads well in
     // the ASCII pass without significantly lighting the world.
-    this.viewLight = new THREE.PointLight(0xdfe8ff, 2.4, 1.1, 2);
+    this.viewLight = new THREE.PointLight(0xdfe8ff, 3.8, 1.5, 2);
     this.viewLight.position.set(0.15, 0.25, 0.05);
     this.viewRoot.add(this.viewLight);
-    this.viewLightWarm = new THREE.PointLight(0xffcf9a, 1.4, 0.9, 2);
+    this.viewLightWarm = new THREE.PointLight(0xffcf9a, 2.2, 1.3, 2);
     this.viewLightWarm.position.set(0.5, -0.3, -0.2);
     this.viewRoot.add(this.viewLightWarm);
     this.muzzleFlash = this._makeFlash();
@@ -37,6 +37,18 @@ export class WeaponSystem {
     // Melee slash trail (camera space; a fading crescent that sweeps with the swing).
     this.slash = this._makeSlash();
     this.viewRoot.add(this.slash.root);
+    // A camera-space energy ring shown while braced in the Tang-dao guard.
+    this.guardRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.5, 0.62, 40),
+      new THREE.MeshBasicMaterial({
+        color: 0x9fe8ff, transparent: true, opacity: 0, blending: THREE.AdditiveBlending,
+        depthTest: false, depthWrite: false, side: THREE.DoubleSide, toneMapped: false,
+      })
+    );
+    this.guardRing.position.set(0, -0.03, -1.12);
+    this.guardRing.visible = false;
+    this.guardRing.renderOrder = 21;
+    this.viewRoot.add(this.guardRing);
 
     this.progression = ctx.progression || null;
     this.buffs = ctx.buffs || null;
@@ -70,12 +82,16 @@ export class WeaponSystem {
     this.recoilRot = new THREE.Vector2();
     this._overclock = 0;
     this._lastShotAt = -9;
-    this._vmBasePos = new THREE.Vector3(0.32, -0.28, -0.55);
-    this._vmAdsPos = new THREE.Vector3(0, -0.16, -0.42);
+    this._vmBasePos = new THREE.Vector3(0.58, -0.52, -1.05);
+    this._vmAdsPos = new THREE.Vector3(0, -0.28, -0.95);
     // Melee combo / swing state
-    this._melee = null;      // { t, dur, variant, hitAt, hit, freeze, hitCount }
+    this._melee = null;      // { t, dur, variant, hitAt, hit, freeze, hits }
     this._combo = 0;         // advances per swing, wraps 0..2
     this._comboTimer = 0;    // resets the combo when idle
+    this._lastMeleePose = null; // end pose of the previous swing, for seamless chains
+    this._meleeRecover = 0;
+    this._comboHits = 0;     // consecutive landed swings (damage ramp)
+    this._comboHitTimer = 0;
     // Blade-deflection buff: earned by holding a swing for >5s. The chance
     // scales with how slowly you move; fully braced = 100% but rooted until you
     // release the button.
@@ -83,6 +99,9 @@ export class WeaponSystem {
     this._deflect = 0;
     this._deflectActive = false;
     this._deflectStep = 0;
+    this._guardStance = false;
+    this._guardBlend = 0;
+    this._guardFlash = 0;
     this.lastShotTime = 0;
     this.onKillCallback = null;
     this.buildModels();
@@ -91,12 +110,14 @@ export class WeaponSystem {
 
   _makeMats() {
     return {
-      body: new THREE.MeshStandardMaterial({ color: 0x2b3138, metalness: 0.85, roughness: 0.4 }),
-      dark: new THREE.MeshStandardMaterial({ color: 0x14181d, metalness: 0.6, roughness: 0.55 }),
+      body: new THREE.MeshStandardMaterial({ color: 0x6a7785, metalness: 0.68, roughness: 0.38, emissive: 0x35414c, emissiveIntensity: 1.2 }),
+      dark: new THREE.MeshStandardMaterial({ color: 0x3c4753, metalness: 0.55, roughness: 0.5, emissive: 0x141b23, emissiveIntensity: 1.15 }),
       accent: new THREE.MeshStandardMaterial({ color: 0x1b2026, emissive: 0x37ff8b, emissiveIntensity: 1.4, roughness: 0.3 }),
       accentWarm: new THREE.MeshStandardMaterial({ color: 0x201a12, emissive: 0xffb000, emissiveIntensity: 1.4, roughness: 0.3 }),
       accentCyan: new THREE.MeshStandardMaterial({ color: 0x12202a, emissive: 0x4de0ff, emissiveIntensity: 1.6, roughness: 0.3 }),
       glass: new THREE.MeshStandardMaterial({ color: 0x224455, emissive: 0x66ccff, emissiveIntensity: 0.4, transparent: true, opacity: 0.5 }),
+      glove: new THREE.MeshStandardMaterial({ color: 0x4a3c31, roughness: 0.85, metalness: 0.1 }),
+      gloveDark: new THREE.MeshStandardMaterial({ color: 0x2d333a, roughness: 0.8, metalness: 0.15 }),
     };
   }
 
@@ -187,25 +208,58 @@ export class WeaponSystem {
         break;
       }
       case 'dao': {
-        // A Tang dao: pommel, wrapped grip, disc guard, a long single-edged
-        // blade with a bright emissive edge. Kept *slim and modestly lit* — a
-        // wide/over-bright blade smears into a slab under the ASCII bloom.
+        // A Tang dao: wrapped grip, disc guard, red tassel and a tapered,
+        // single-edged blade with a bright emissive edge. The blade is built
+        // from three shrinking segments so the silhouette narrows to a real
+        // point instead of reading as one rectangular slab in ASCII.
         const bladeMat = new THREE.MeshStandardMaterial({ color: 0xd7e2ec, metalness: 0.9, roughness: 0.22, emissive: 0x223038, emissiveIntensity: 0.5 });
         const edgeMat = new THREE.MeshStandardMaterial({ color: 0x9ff0ff, emissive: 0x7fe0f0, emissiveIntensity: 1.15, roughness: 0.3, toneMapped: false });
-        g.add(this._box(0.07, 0.07, 0.34, 0, 0, -0.22, D));           // grip
-        g.add(this._box(0.09, 0.09, 0.05, 0, 0, -0.035, accent));      // pommel
-        g.add(this._box(0.26, 0.035, 0.055, 0, 0, -0.41, accent));     // disc guard
-        // long blade (1.85 m), thin profile
-        g.add(this._box(0.042, 0.018, 1.72, 0, 0.006, -1.32, bladeMat));
-        g.add(this._box(0.010, 0.024, 1.70, 0.017, 0.006, -1.32, edgeMat));
-        g.add(this._box(0.038, 0.016, 0.30, 0.012, 0.008, -2.32, bladeMat));  // tip
-        g.add(this._box(0.009, 0.022, 0.28, 0.024, 0.008, -2.32, edgeMat));
+        const fullerMat = new THREE.MeshStandardMaterial({ color: 0x59646e, metalness: 0.9, roughness: 0.3 });
+        const wrapMat = new THREE.MeshStandardMaterial({ color: 0x1a1d21, roughness: 0.9 });
+        g.add(this._box(0.07, 0.075, 0.34, 0, 0, -0.22, D));           // grip core
+        for (let i = 0; i < 5; i++) g.add(this._box(0.076, 0.082, 0.035, 0, 0, -0.10 - i * 0.055, wrapMat)); // wrap rings
+        g.add(this._box(0.10, 0.10, 0.05, 0, 0, -0.035, accent));      // pommel
+        g.add(this._box(0.26, 0.035, 0.055, 0, 0, -0.405, accent));    // disc guard
+        g.add(this._box(0.05, 0.05, 0.04, 0, 0, -0.37, D));            // ferrule
+        // tapered blade: base → mid → tip
+        g.add(this._box(0.042, 0.018, 0.92, 0, 0.006, -0.88, bladeMat));
+        g.add(this._box(0.010, 0.024, 0.90, 0.017, 0.006, -0.88, edgeMat));
+        g.add(this._box(0.038, 0.017, 0.55, 0.006, 0.007, -1.60, bladeMat));
+        g.add(this._box(0.009, 0.022, 0.53, 0.0175, 0.007, -1.60, edgeMat));
+        g.add(this._box(0.030, 0.015, 0.34, 0.010, 0.008, -2.03, bladeMat));
+        g.add(this._box(0.008, 0.020, 0.32, 0.0195, 0.008, -2.03, edgeMat));
+        g.add(this._box(0.016, 0.006, 1.60, -0.012, 0.011, -1.24, fullerMat)); // fuller
+        // red tassel hanging from the pommel
+        g.add(this._box(0.022, 0.022, 0.18, 0.03, -0.055, 0.02, this.materials.accentWarm));
         break;
       }
       default: {
         g.add(this._box(0.1, 0.12, 0.5, 0, 0, -0.2, B));
       }
     }
+    // ---- gloved hands + receiver detail shared by the ballistic weapons ----
+    if (id !== 'dao') {
+      const G = this.materials.glove, GD = this.materials.gloveDark;
+      const supportZ = {
+        pistol: -0.20, smg: -0.34, rifle: -0.42, shotgun: -0.44,
+        sniper: -0.48, plasma: -0.42, launcher: -0.40,
+      }[id] ?? -0.36;
+      // trigger hand wrapped around the grip
+      g.add(this._box(0.09, 0.11, 0.14, 0.005, -0.16, 0.03, G));
+      g.add(this._box(0.10, 0.045, 0.15, 0.005, -0.215, 0.03, GD));
+      // support hand under the handguard
+      g.add(this._box(0.085, 0.10, 0.17, 0.0, -0.11, supportZ, G));
+      g.add(this._box(0.095, 0.04, 0.18, 0.0, -0.165, supportZ, GD));
+      // ejection port + side rail read as mechanical detail
+      g.add(this._box(0.012, 0.05, 0.14, id === 'pistol' ? 0.046 : 0.052, 0.015, -0.18, D));
+      g.add(this._box(0.02, 0.02, 0.06, 0, 0.075, -0.06, accent));
+    } else {
+      const G = this.materials.glove;
+      g.add(this._box(0.07, 0.086, 0.14, 0, 0, -0.24, this.materials.gloveDark));
+      g.add(this._box(0.062, 0.076, 0.11, 0, 0.005, -0.47, G));
+    }
+    g.scale.setScalar(0.72);
+
     // muzzle reference
     const muzzle = new THREE.Object3D();
     muzzle.position.set(0, id === 'sniper' ? 0.06 : 0.0, id === 'shotgun' ? -1.0 : id === 'sniper' ? -1.35 : -0.75);
@@ -262,6 +316,48 @@ export class WeaponSystem {
   }
   _recomputeAll() { for (const w of this.weapons) this.recompute(w); }
 
+  /**
+   * Hard reset of all per-run weapon state. Critically this strips attachments
+   * and restores base ammo counts, so a FUN MODE run (which assigns best-in-slot
+   * attachments directly and sets reserve ammo to 9999) cannot leave a normal
+   * run with a fully-kitted arsenal.
+   */
+  resetRun() {
+    for (const w of this.weapons) {
+      w.attachments = {};
+      w.ammoType = 'standard';
+      w.mag = w.base.mag;
+      w.ammo = w.base.mag;
+      w.reserve = w.base.reserve;
+      w.stats = { ...w.base };
+      this.recompute(w);
+      w.ammo = Math.min(w.ammo, w.mag);
+    }
+    this.index = 2; // PULSE AR, the same weapon every run starts with
+    this.cooldown = 0;
+    this.reloading = false;
+    this.reloadT = 0;
+    this.switching = 0;
+    this.pump = 0;
+    this.spreadBloom = 0;
+    this.ads = 0; this.adsTarget = 0;
+    this._melee = null;
+    this._combo = 0; this._comboTimer = 0;
+    this._lastMeleePose = null; this._meleeRecover = 0;
+    this._comboHits = 0; this._comboHitTimer = 0;
+    this._meleeHold = 0; this._deflect = 0; this._deflectActive = false; this._deflectStep = 0;
+    this._guardStance = false; this._guardBlend = 0; this._guardFlash = 0;
+    if (this.guardRing) { this.guardRing.visible = false; this.guardRing.material.opacity = 0; }
+    this._overclock = 0;
+    this._lastShotAt = -9;
+    this.lastShotTime = 0;
+    if (this.slash) { this.slash.life = 0; this.slash.root.visible = false; this.slash.mat.opacity = 0; }
+    if (this.muzzleFlash) { this.muzzleFlash.life = 0; this.muzzleFlash.root.visible = false; }
+    this.recoilKick.set(0, 0, 0);
+    this.recoilRot.set(0, 0);
+    if (this._models) this._selectVisual(this.index, true);
+  }
+
   /** Load a different ammunition type on the current weapon + add reserve. */
   loadAmmo(ammoId, amount) {
     const w = this.weapon;
@@ -297,6 +393,7 @@ export class WeaponSystem {
   }
 
   get weapon() { return this.weapons[this.index]; }
+  get meleeCombo() { return this._comboHits; }
   get def() { return this.weapons[this.index].stats; }
   get baseDef() { return this.weapons[this.index].base; }
 
@@ -311,6 +408,9 @@ export class WeaponSystem {
     this.reloadT = 0;
     this.switching = 0.45;
     this._melee = null;
+    this._guardStance = false;
+    this._guardBlend = 0;
+    if (this.guardRing) this.guardRing.visible = false;
     if (this.slash) { this.slash.root.visible = false; this.slash.mat.opacity = 0; }
     this._selectVisual(i);
     if (this.ctx.audio) this.ctx.audio.reload(1);
@@ -388,7 +488,7 @@ export class WeaponSystem {
         // melee: hold LMB to chain swings; RMB is a subtle guard (no zoom)
         this.adsTarget = adsHeld ? 0.35 : 0;
         this.ads += (this.adsTarget - this.ads) * Math.min(1, dt * 10);
-        if (this.switching <= 0 && this.cooldown <= 0 && fireHeld) this._swing();
+        if (this.switching <= 0 && this.cooldown <= 0 && fireHeld && !this._guardStance && !this._melee) this._swing();
         // continuous-hold meter -> blade deflection buff
         if (fireHeld) this._meleeHold = Math.min(12, this._meleeHold + dt);
         else this._meleeHold = 0;
@@ -413,11 +513,18 @@ export class WeaponSystem {
       this.ads += (0 - this.ads) * Math.min(1, dt * 8);
     }
 
-    // blade-deflection buff (only meaningful while holding a melee swing)
-    this._updateDeflect(dt, active && input.mouseDown(0));
-
     // melee swing timeline (advances even while paused just to settle)
+    this._guardFlash = Math.max(0, this._guardFlash - dt);
     this._tickMelee(dt);
+
+    // Blade-deflection buff. Evaluated *after* the swing timeline so the guard
+    // stance can latch on the frame a swing finishes; otherwise the held-fire
+    // auto-swing re-arms `_melee` every frame and the guard never appears.
+    this._updateDeflect(dt, active && input.mouseDown(0));
+    if (this._comboHitTimer > 0) {
+      this._comboHitTimer -= dt;
+      if (this._comboHitTimer <= 0) this._comboHits = 0;
+    }
 
     // spread bloom decay
     this.spreadBloom = Math.max(0, this.spreadBloom - dt * 3.2);
@@ -448,14 +555,24 @@ export class WeaponSystem {
 
     const adsBlend = this.ads;
     const base = this._vmBasePos.clone().lerp(this._vmAdsPos, adsBlend);
-    const bobX = Math.sin(t * (player.sprinting ? 13 : 9)) * 0.012 * bob * (1 - adsBlend);
-    const bobY = Math.abs(Math.cos(t * (player.sprinting ? 13 : 9))) * 0.012 * bob * (1 - adsBlend);
-    // recoil spring
+    const bobRate = player.sprinting ? 13 : 9.5;
+    const bobX = Math.sin(t * bobRate) * 0.014 * bob * (1 - adsBlend);
+    const bobY = Math.abs(Math.cos(t * bobRate)) * 0.014 * bob * (1 - adsBlend);
+    const moving = Math.min(1, speed / Math.max(1, player.sprintSpeed));
+    // idle breathing / running lean / landing dip / air float
+    const breath = Math.sin(t * 1.45) * 0.0045 * (1 - adsBlend);
+    const sprintDrop = player.sprinting ? 0.045 * (1 - adsBlend) : 0;
+    const sprintRoll = player.sprinting ? -0.10 * (1 - adsBlend) : 0;
+    const landDip = player.landDip * 0.55;
+    const airY = player.onGround ? 0 : THREE.MathUtils.clamp(-player.vel.y * 0.006, -0.045, 0.045);
+    const airPitch = player.onGround ? 0 : THREE.MathUtils.clamp(player.vel.y * 0.012, -0.06, 0.06);
+
+    // recoil spring with a tiny overshoot
     this.recoilKick.multiplyScalar(Math.max(0, 1 - dt * 12));
     this.recoilRot.multiplyScalar(Math.max(0, 1 - dt * 12));
 
     // reload dip
-    let reloadRot = 0, reloadDrop = 0;
+    let reloadRot = 0, reloadDrop = 0, switchRot = 0;
     if (this.reloading) {
       const w = this.weapon;
       const total = w.stats.perShell ? w.stats.perShell : w.stats.reload;
@@ -464,21 +581,25 @@ export class WeaponSystem {
       reloadRot = s * 0.9;
       reloadDrop = s * 0.22;
     }
-    // switch drop
-    if (this.switching > 0) reloadDrop += (this.switching / 0.45) * 0.4;
+    // weapon switch: drop + swing up from the side
+    if (this.switching > 0) {
+      const k = this.switching / 0.45;
+      reloadDrop += k * 0.40;
+      switchRot = -k * 0.55;
+    }
 
     if (this.def.melee) {
-      this._poseMelee(m, dt, swayX, swayY, bob, reloadDrop);
+      this._poseMelee(m, dt, swayX, swayY, bob, reloadDrop + landDip * 0.5);
     } else {
       m.position.set(
-        base.x + swayX + bobX - this.recoilKick.x,
-        base.y + swayY + bobY - reloadDrop - this.recoilKick.y,
-        base.z + this.recoilKick.z
+        base.x + swayX * 1.15 + bobX - this.recoilKick.x + moving * 0.012,
+        base.y + swayY + bobY - reloadDrop - sprintDrop - landDip + airY + breath - this.recoilKick.y,
+        base.z + this.recoilKick.z + moving * 0.010
       );
       m.rotation.set(
-        reloadRot + this.recoilRot.x - swayY * 2,
-        this.recoilRot.y - swayX * 3,
-        this.recoilRot.y * 1.5 + (this.adsTarget ? 0 : 0.02)
+        reloadRot + switchRot + this.recoilRot.x - swayY * 2.2 + airPitch,
+        this.recoilRot.y - swayX * 3.2 + (player.sprinting ? 0.055 : 0),
+        this.recoilRot.y * 1.5 + swayY * 1.4 + sprintRoll + moving * 0.02
       );
     }
 
@@ -488,6 +609,20 @@ export class WeaponSystem {
 
     // Slash trail sweep/fade.
     this._animateSlash(dt);
+
+    // Guard ring: visible only when actually braced, pulses and flashes on a
+    // successful deflection.
+    const gr = this.guardRing;
+    if (gr) {
+      const on = !!this._guardStance && !!this.def.melee;
+      gr.visible = on;
+      if (on) {
+        const pulse = 0.20 + 0.07 * (0.5 + 0.5 * Math.sin(this.time * 3.4)) + this._guardFlash * 1.4;
+        gr.material.opacity = Math.min(0.62, pulse);
+        gr.scale.setScalar(1 + this._guardFlash * 1.2);
+        gr.rotation.z += dt * 0.35;
+      }
+    }
   }
 
   /** Procedural Tang-dao poses: three distinct swings (horizontal / chop / rising). */
@@ -495,30 +630,40 @@ export class WeaponSystem {
     const swing = this._melee;
     const bobX = Math.sin(this.time * 9) * 0.014 * bob;
     const bobY = Math.abs(Math.cos(this.time * 9)) * 0.012 * bob;
+    this._guardBlend += ((this._guardStance ? 1 : 0) - this._guardBlend) * Math.min(1, dt * 10);
+    const guardPose = lerpPose(DAO_IDLE, DAO_GUARD, this._guardBlend);
     let pose;
     if (!swing) {
-      pose = DAO_IDLE;
+      if (this._meleeRecover > 0 && this._lastMeleePose) {
+        // recovery: ease from the follow-through back to the ready stance
+        const u = 1 - this._meleeRecover / 0.18;
+        pose = lerpPose(this._lastMeleePose, guardPose, THREE.MathUtils.smoothstep(u, 0, 1));
+      } else {
+        pose = guardPose;
+      }
     } else {
       const p = THREE.MathUtils.clamp(swing.t / swing.dur, 0, 1);
       const v = swing.variant;
       const wind = DAO_WIND[v], end = DAO_END[v];
-      if (p < 0.28) {
-        // wind-up: ease from the ready stance into the cocked pose (no pop)
-        pose = lerpPose(DAO_IDLE, wind, THREE.MathUtils.smoothstep(p / 0.28, 0, 1));
-      } else if (p < 0.60) {
-        // the cut: fast ease-out
-        const u = (p - 0.28) / 0.32;
+      // Next strike starts from where the previous one finished, not from a
+      // teleported idle pose — that is what makes a held combo read as one
+      // continuous motion.
+      const start = this._lastMeleePose || DAO_IDLE;
+      if (p < 0.24) {
+        pose = lerpPose(start, wind, THREE.MathUtils.smoothstep(p / 0.24, 0, 1));
+      } else if (p < 0.55) {
+        const u = (p - 0.24) / 0.31;
         pose = lerpPose(wind, end, 1 - Math.pow(1 - u, 3));
       } else {
-        // follow-through: settle at the end pose
-        const u = (p - 0.60) / 0.40;
+        // follow-through with a little settling overshoot
+        const u = (p - 0.55) / 0.45;
         pose = lerpPose(end, end, THREE.MathUtils.smoothstep(u, 0, 1));
       }
     }
     let lunge = 0;
     if (swing) {
       const p = THREE.MathUtils.clamp(swing.t / swing.dur, 0, 1);
-      lunge = Math.sin(Math.PI * Math.min(1, p / 0.62)) * 0.12;
+      lunge = Math.sin(Math.PI * Math.min(1, p / 0.62)) * 0.16;
     }
     m.position.set(
       pose[0] + swayX + bobX - this.recoilKick.x,
@@ -553,17 +698,34 @@ export class WeaponSystem {
     const dur = 60 / Math.max(40, def.rpm);
     const variant = this._combo % 3;
     this._combo = (this._combo + 1) % 3;
-    this._comboTimer = 0.55;
-    this._melee = { t: 0, dur, variant, hitAt: dur * 0.42, hit: false, freeze: 0, hits: 0 };
-    this.cooldown = dur * 0.84;
+    this._comboTimer = 0.62;
+    // Two overlapping hit windows: the cut itself and a slightly later sweep,
+    // so a target that strafes through the arc during the cut is still caught.
+    this._melee = {
+      t: 0, dur, variant,
+      hitAt: dur * 0.40, hit2At: dur * 0.56,
+      hit: false, hit2: false, freeze: 0, hits: 0, hitSet: new Set(),
+    };
+    this.cooldown = dur * 0.90;
     const a = this.ctx.audio;
     if (a && a.swordSwing) a.swordSwing(variant);
     // slash trail
-    this.slash.life = this.slash.max = dur * 1.0;
+    this.slash.life = this.slash.max = dur * 1.08;
     this.slash.variant = variant;
     this.slash.root.visible = true;
     this.slash.mat.opacity = 0;
-    if (this.ctx.player) this.ctx.player.addRecoil(0.003, 0);
+    // A short forward lunge makes the reach feel physical instead of swinging
+    // at air while standing rooted to the floor.
+    const p = this.ctx.player;
+    if (p) {
+      if (!p.bladeRoot && p.onGround) {
+        const look = p.getLookDir();
+        const push = variant === 2 ? 1.8 : 1.2;
+        p.vel.x += look.x * push;
+        p.vel.z += look.z * push;
+      }
+      p.addRecoil(0.003, variant === 1 ? 0.004 : -0.004);
+    }
   }
 
   _tickMelee(dt) {
@@ -571,12 +733,25 @@ export class WeaponSystem {
       this._comboTimer -= dt;
       if (this._comboTimer <= 0 && !this._melee) this._combo = 0;
     }
+    if (this._meleeRecover > 0) {
+      this._meleeRecover -= dt;
+      if (this._meleeRecover <= 0) {
+        this._meleeRecover = 0;
+        if (!this._melee) this._lastMeleePose = null;
+      }
+    }
     const m = this._melee;
     if (m) {
       if (m.freeze > 0) m.freeze -= dt;   // hit-stop: the blade "sticks" on impact
       else m.t += dt;
-      if (!m.hit && m.t >= m.hitAt) { m.hit = true; this._meleeHit(m); }
-      if (m.t >= m.dur) this._melee = null;
+      const running = !this.ctx.stats || (this.ctx.stats.state === 'playing' && !this.ctx.stats.menuOpen);
+      if (running && !m.hit && m.t >= m.hitAt) { m.hit = true; this._meleeHit(m, false); }
+      if (running && !m.hit2 && m.t >= m.hit2At) { m.hit2 = true; this._meleeHit(m, true); }
+      if (m.t >= m.dur) {
+        this._lastMeleePose = DAO_END[m.variant].slice();
+        this._meleeRecover = 0.18;
+        this._melee = null;
+      }
     }
     if (this.slash.life > 0) {
       this.slash.life -= dt;
@@ -596,6 +771,7 @@ export class WeaponSystem {
     if (!eligible) {
       this._deflect = 0;
       this._deflectActive = false;
+      this._guardStance = false;
       if (player) player.bladeRoot = false;
       return;
     }
@@ -609,6 +785,7 @@ export class WeaponSystem {
       player.bladeRoot = false;
     }
     this._deflectActive = true;
+    this._guardStance = this._deflect > 0.55 && !this._melee;
   }
 
   /** Called from Player.takeDamage for bullet hits. Returns true if deflected. */
@@ -617,7 +794,10 @@ export class WeaponSystem {
     if (Math.random() > this._deflect) return false;
     const ctx = this.ctx;
     const player = ctx.player;
-    const p = point ? new THREE.Vector3(point.x, point.y, point.z) : player.eyePos;
+    // The incoming `point` is the shooter's muzzle; the parry spark belongs at
+    // the blade, directly in front of the player.
+    const p = player.eyePos.clone().addScaledVector(player.getLookDir(), 1.15);
+    p.y -= 0.15;
     this._deflectStep = (this._deflectStep + 1) % 6;
     if (ctx.audio && ctx.audio.swordDeflect) ctx.audio.swordDeflect(this._deflectStep, this._deflect);
     if (ctx.effects) {
@@ -625,12 +805,13 @@ export class WeaponSystem {
       if (ctx.effects.flash) ctx.effects.flash(p, 0xbfe9ff, 3, 0.12);
     }
     if (ctx.hud && ctx.hud.hitmark) ctx.hud.hitmark(true);
+    this._guardFlash = 0.20;
     player.viewShake = Math.min(1, player.viewShake + 0.06);
     return true;
   }
 
-  /** Resolves a swing's damage against every enemy inside the arc. */
-  _meleeHit(m) {
+  /** Resolves one hit window of a swing against every enemy inside the arc. */
+  _meleeHit(m, final = false) {
     const ctx = this.ctx;
     const def = this.def;
     const player = ctx.player;
@@ -640,50 +821,70 @@ export class WeaponSystem {
     const reach = def.reach || 2.8;
     const arcCos = Math.cos(Math.min(1.6, def.arc || 1.2));
     const tmp = new THREE.Vector3();
+    // Combo ramp: each consecutive landed swing hits a little harder; the third
+    // swing is the committed finisher.
+    const comboMul = 1 + Math.min(6, this._comboHits) * 0.06;
+    const finishMul = m.variant === 2 ? 1.22 : m.variant === 1 ? 1.08 : 1.0;
     let count = 0, anyHead = false;
     for (const e of ctx.enemies.list) {
-      if (!e.alive || e.ghost) continue;
+      if (!e.alive || e.ghost || m.hitSet.has(e)) continue;
       const c = e.center;
       const dx = c.x - origin.x, dy = c.y - origin.y, dz = c.z - origin.z;
       const dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
-      if (dist > reach + e.type.radius) continue;
+      if (dist > reach + e.type.radius + 0.35) continue;
       const inv = 1 / Math.max(0.001, dist);
       const nx = dx * inv, ny = dy * inv, nz = dz * inv;
-      if (nx * look.x + ny * look.y + nz * look.z < arcCos) continue;
+      const dot = nx * look.x + ny * look.y + nz * look.z;
+      // Wide arc, plus a close-range magnetism band so a target standing almost
+      // on top of the player cannot slip through the cone boundary.
+      const perp = Math.sqrt(Math.max(0, dx * dx + dz * dz - (dx * look.x + dz * look.z) ** 2));
+      if (dot < arcCos && perp > 1.05) continue;
       const wHit = ctx.world.raycast(origin, tmp.set(nx, ny, nz), dist, (b) => b.tag === 'sidewalk');
       if (wHit && wHit.distance < dist - 0.35) continue;
-      const head = dy > 0.5 && (nx * look.x + ny * look.y + nz * look.z) > 0.85;
+      const head = dy > 0.5 && dot > 0.85;
       const falloff = 1 - Math.min(0.35, (dist / reach) * 0.35);
-      const dmg = def.dmg * falloff * (head ? (def.headshotMul || 2) : 1);
+      const dmg = def.dmg * falloff * comboMul * finishMul * (head ? (def.headshotMul || 2) : 1);
       if (this.progression) this.progression.addXp('dao', dmg * 0.5 + (head ? 4 : 1));
       if (ctx.stats) ctx.stats.hits++;
       const wasAlive = e.alive;
       ctx.enemies.damage(e, dmg, c, look, head, 'dao');
       if (wasAlive && !e.alive && def.perks && def.perks.lifesteal) ctx.player.heal(5);
       // knockback + stagger: the blade bites and shoves the target
-      e.vel.x += look.x * 5.5; e.vel.z += look.z * 5.5;
-      e.stagger = Math.max(e.stagger, 0.4);
+      const shove = (m.variant === 2 ? 7.8 : 5.5) + Math.min(6, this._comboHits) * 0.35;
+      e.vel.x += look.x * shove; e.vel.z += look.z * shove;
+      e.stagger = Math.max(e.stagger, m.variant === 2 ? 0.55 : 0.42);
       ctx.effects.burst(c, tmp.set(-look.x, 0.2, -look.z).normalize(), 'blood', head ? 22 : 16, head ? 1.4 : 1.15);
       ctx.effects.burst(c, tmp.set(look.x, 0.4, look.z).normalize(), 'metal', 6, 0.7);
       if (head) anyHead = true;
+      m.hitSet.add(e);
       count++;
     }
-    m.hits = count;
+    m.hits = (m.hits || 0) + count;
     const a = ctx.audio;
     if (count > 0) {
+      this._comboHits = Math.min(9, this._comboHits + 1);
+      this._comboHitTimer = 1.8;
       // 阻力: the swing slams to a stop, the blade is shoved back, the camera
       // kicks and the whole sim hit-stops for a beat.
-      m.freeze = 0.035;
+      m.freeze = Math.max(m.freeze, m.variant === 2 ? 0.055 : 0.04);
       m.t = Math.max(m.t, m.hitAt);          // hold the pose at the moment of contact
-      this.recoilKick.set((Math.random() - 0.5) * 0.03, 0.03, 0.16);
-      this.recoilRot.set(-0.13, (Math.random() - 0.5) * 0.10);
-      player.viewShake = Math.min(1.1, player.viewShake + 0.20 + 0.06 * count);
-      player.addRecoil(0.014, (Math.random() - 0.5) * 0.008);
-      if (this.ctx.stats) this.ctx.stats._hitStop = 0.06;   // global impact stop
+      const kick = m.variant === 2 ? 1.35 : 1;
+      this.recoilKick.set((Math.random() - 0.5) * 0.03 * kick, 0.03 * kick, 0.17 * kick);
+      this.recoilRot.set(-0.14 * kick, (Math.random() - 0.5) * 0.10);
+      player.viewShake = Math.min(1.2, player.viewShake + 0.20 + 0.06 * count);
+      player.addRecoil(0.015 * kick, (Math.random() - 0.5) * 0.01);
+      if (this.ctx.stats) this.ctx.stats._hitStop = m.variant === 2 ? 0.09 : 0.06;
       if (a && a.swordHit) a.swordHit(anyHead ? 'head' : 'flesh', 1 + 0.2 * count);
+      if (a && a.duckMusic) a.duckMusic(0.22, 0.4);
       if (ctx.hud) ctx.hud.hitmark(anyHead);
-      if (a) a.duckMusic(0.22, 0.4);
-    } else {
+      if (ctx.effects) {
+        ctx.effects.flash(player.eyePos.clone().addScaledVector(look, 1.2), 0xbfe9ff, 2.2, 0.09);
+        if (m.variant === 2) {
+          ctx.effects.shockRing(c0(ctx, look, origin), 0xbfe9ff, 0.35, 18);
+          ctx.effects.burst(c0(ctx, look, origin), new THREE.Vector3(0, 1, 0), 'energy', 14, 1.1);
+        }
+      }
+    } else if (final && (m.hits || 0) === 0) {
       if (a && a.swordMiss) a.swordMiss();
     }
   }
@@ -721,12 +922,17 @@ export class WeaponSystem {
     if (ctx.audio) ctx.audio.gunshot(def.id === 'sniper' ? 'sniper' : def.id === 'shotgun' ? 'shotgun' : def.id === 'smg' ? 'smg' : def.id === 'pistol' ? 'pistol' : def.id === 'plasma' ? 'plasma' : 'rifle');
     if (ctx.audio) ctx.audio.duckMusic(0.35, 0.5);
 
-    // muzzle flash
-    const muzzleWorld = new THREE.Vector3();
-    this.muzzleFlash.root.getWorldPosition(muzzleWorld);
-    this.muzzleFlash.root.position.copy(muzzleWorld);
-    // reposition flash in world? it's a child of camera-space root; keep in view space
-    this.muzzleFlash.root.position.set(0, def.id === 'sniper' ? 0.02 : 0, def.id === 'sniper' ? -1.6 : -1.2);
+    // muzzle flash — anchored to the current viewmodel's muzzle, so every gun
+    // flashes exactly at the end of its own barrel.
+    const muzzleRef = this.currentModel && this.currentModel.userData.muzzle;
+    if (muzzleRef) {
+      const wp = new THREE.Vector3();
+      muzzleRef.getWorldPosition(wp);
+      this.viewRoot.worldToLocal(wp);
+      this.muzzleFlash.root.position.copy(wp);
+    } else {
+      this.muzzleFlash.root.position.set(0, 0, -1.2);
+    }
     this.muzzleFlash.root.rotation.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
     this.muzzleFlash.life = 0.05;
     this.muzzleFlash.mat.opacity = 0.6;
@@ -898,6 +1104,10 @@ export class WeaponSystem {
   }
 }
 
+function c0(ctx, look, origin) {
+  return origin.clone().addScaledVector(look, 1.6);
+}
+
 function surfaceFromTag(tag) {
   switch (tag) {
     case 'building': return 'concrete';
@@ -943,16 +1153,19 @@ function makeSlashTexture() {
 
 /* ------------------------- Tang-dao swing keyframes ------------------------ */
 // Pose = [posX, posY, posZ, rotX, rotY, rotZ] in camera space.
-const DAO_IDLE = [0.46, -0.40, -0.52, 0.22, 1.05, -0.32];
+// The dao is held mostly *forward* (small rotY) so the long blade reads as a
+// blade receding toward the crosshair instead of a stripe across the monitor.
+const DAO_IDLE = [0.44, -0.38, -0.66, 0.18, 0.52, 0.22];
+const DAO_GUARD = [0.26, -0.28, -0.72, 0.10, 0.38, -0.42];
 const DAO_WIND = [
-  [0.55, -0.18, -0.50, 0.05, -1.30, -0.10], // 0 horizontal: cocked to the right
-  [0.14, 0.36, -0.44, 1.45, 0.05, 0.08],    // 1 chop: raised overhead
-  [-0.34, -0.46, -0.48, -0.60, 1.10, -0.15], // 2 rising: low-left
+  [0.58, -0.24, -0.62, 0.05, -0.50, 0.12],  // 0 horizontal: cocked right
+  [0.20, 0.20, -0.60, 0.78, 0.10, 0.10],    // 1 chop: raised overhead
+  [-0.12, -0.50, -0.62, -0.35, 0.48, -0.20], // 2 rising: low-left
 ];
 const DAO_END = [
-  [-0.46, -0.36, -0.46, 0.20, 1.35, 0.12],  // 0 horizontal: swept left
-  [0.06, -0.24, -0.52, -0.35, 0.02, 0.06],  // 1 chop: down-forward
-  [0.50, -0.14, -0.44, 0.75, -1.05, 0.12],  // 2 rising: high-right
+  [-0.26, -0.32, -0.64, 0.14, 0.78, -0.18], // 0 horizontal: swept left
+  [0.10, -0.26, -0.60, -0.42, 0.26, 0.10],  // 1 chop: down-forward
+  [0.44, -0.14, -0.60, 0.52, -0.28, 0.22],  // 2 rising: high-right
 ];
 function lerpPose(a, b, t) {
   return [

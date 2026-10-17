@@ -49,7 +49,7 @@ export class ProjectileManager {
     const {
       pos, vel, type = 'plasma', damage = 30, radius = 0, fuse = -1,
       owner = 'player', color = 0x66ddff, gravity = 0, bounce = 0, life = 6,
-      speed = 0, aoe = 0, kind = null,
+      speed = 0, aoe = 0, kind = null, charge = 0,
     } = opts;
     let p = this.pool.pop();
     if (!p) p = { mesh: null };
@@ -72,18 +72,27 @@ export class ProjectileManager {
     p.life = life;
     p.aoe = aoe;
     p.kind = kind;
+    p.charge = charge;
     p.active = true;
     this.list.push(p);
     return p;
   }
 
-  spawnGrenade(pos, dir, owner = 'player', power = 16, kind = 'frag') {
+  spawnGrenade(pos, dir, owner = 'player', power = 16, kind = 'frag', opts = {}) {
+    // Never spawn a grenade below the pavement (looking straight down used to
+    // place the initial position inside the sidewalk collider, after which the
+    // ray test could never see the floor and the grenade fell through the map).
+    const p = pos.clone();
+    const gh = this.world.groundHeight(p.x, p.z);
+    if (p.y < gh + 0.4) p.y = gh + 0.4;
+    const up = opts.up ?? 3;
+    const charge = THREE.MathUtils.clamp(opts.charge ?? 0, 0, 1);
     return this.spawn({
-      pos, vel: dir.clone().multiplyScalar(power).add(new THREE.Vector3(0, 3, 0)),
+      pos: p, vel: dir.clone().multiplyScalar(power).add(new THREE.Vector3(0, up, 0)),
       type: 'grenade', damage: kind === 'emp' || kind === 'smoke' || kind === 'flash' ? 10 : 120,
       aoe: kind === 'emp' ? 7.5 : kind === 'cryo' ? 6.5 : kind === 'flash' ? 8 : 6.5,
       fuse: kind === 'smoke' ? 1.2 : kind === 'flash' ? 1.6 : 2.2, owner,
-      gravity: 20, bounce: 0.42, color: grenadeColor(kind), life: 4, kind,
+      gravity: 20, bounce: 0.42, color: grenadeColor(kind), life: 4, kind, charge,
     });
   }
   spawnPlasma(pos, dir, owner = 'player', speed = 70, damage = 42, color = 0x66ddff) {
@@ -126,6 +135,9 @@ export class ProjectileManager {
       const dist = move.length();
       if (dist > 0.0001) {
         const dir = move.clone().normalize();
+        // The sidewalk collider is skipped (as for hitscan bullets) because it
+        // is a huge, thin pad; grenades get an exact analytic floor bounce in
+        // `_groundContact` instead. Roofs/interior floors are still raycast.
         const hit = this.world.raycast(p.pos, dir, dist + p.hitRadius, (b) => b.tag === 'sidewalk');
         if (hit && hit.distance <= dist + p.hitRadius) {
           // impact
@@ -157,6 +169,10 @@ export class ProjectileManager {
           p.pos.add(move);
         }
       }
+      // Explicit floor contact. The sidewalk collider covers the whole block
+      // pad but is only 0.18 m thick; a fast grenade could tunnel through it
+      // between frames, so clamp against the analytic terrain height as well.
+      if (p.type === 'grenade') this._groundContact(p);
       if (p.life <= 0) { this._detonate(p, enemies, player); this._remove(i, p); continue; }
 
       // sync mesh
@@ -166,6 +182,9 @@ export class ProjectileManager {
         p.mesh.quaternion.setFromRotationMatrix(m);
       } else if (p.type === 'grenade') {
         p.mesh.rotation.x += dt * 6; p.mesh.rotation.y += dt * 4;
+        // Armed-grenade blink so it reads clearly in the ASCII pass.
+        const blink = 0.6 + 0.9 * (0.5 + 0.5 * Math.sin(now * (p.fuse < 0.7 ? 28 : 14) + i));
+        if (p.mesh.material) p.mesh.material.emissiveIntensity = blink;
       }
       // trail
       if (p.type !== 'grenade' && Math.random() < 0.7) {
@@ -191,6 +210,27 @@ export class ProjectileManager {
     for (; li < this.lights.length; li++) this.lights[li].intensity = 0;
   }
 
+  /** Keep a grenade on top of the street/sidewalk and bounce it there. */
+  _groundContact(p) {
+    const gh = this.world.groundHeight(p.pos.x, p.pos.z);
+    const floor = gh + p.hitRadius;
+    if (p.pos.y > floor) return false;
+    p.pos.y = floor;
+    if (p.vel.y < -1.0) {
+      p.vel.y = -p.vel.y * (p.bounce || 0.35);
+      p.vel.x *= 0.82;
+      p.vel.z *= 0.82;
+      if (this.audio) this.audio.grenadeBounce();
+    } else {
+      p.vel.y = 0;
+      p.vel.x *= 0.9;
+      p.vel.z *= 0.9;
+      // Settle completely so a resting grenade cannot jitter.
+      if (Math.hypot(p.vel.x, p.vel.z) < 0.35) { p.vel.x = 0; p.vel.z = 0; }
+    }
+    return true;
+  }
+
   _applyDirect(p, eHit, enemies, player) {
     if (p.aoe > 0) {
       this.effects.explosion(eHit.point, 1);
@@ -204,6 +244,10 @@ export class ProjectileManager {
 
   _detonate(p, enemies, player, point, normal) {
     const pt = point || p.pos.clone();
+    // Never resolve an explosion underground: lift it onto the pavement so the
+    // AoE/flash/particles are visible and connect with enemies on the surface.
+    const gh = this.world.groundHeight(pt.x, pt.z);
+    if (pt.y < gh + 0.15) pt.y = gh + 0.15;
     if (p.kind && p.kind !== 'frag') {
       this._grenadeEffect(pt, p.kind, p, enemies, player);
       return;
